@@ -1,0 +1,16 @@
+{"q": "L4数据下载需要几级审批？", "intent_l2": "insurance.security.access_control", "expected_doc_ids": ["互联网保险系统数据安全规范"]}
+{"q": "离职员工账号多久内必须停用？", "intent_l2": "insurance.security.identity_lifecycle", "expected_doc_ids": ["互联网保险系统数据安全规范"]}
+{"q": "理赔病历影像默认能下载吗？", "intent_l2": "insurance.security.access_control", "expected_doc_ids": ["互联网保险系统数据安全规范"]}
+{"q": "TLS最低版本要求是多少？", "intent_l2": "insurance.security.transmission", "expected_doc_ids": ["互联网保险系统数据安全规范"]}
+{"q": "哪些数据属于L4高敏级别？", "intent_l2": "insurance.security.classification", "expected_doc_ids": ["互联网保险系统数据安全规范"]}
+{"q": "医疗质检专家能否解密病历影像？", "intent_l2": "insurance.security.access_control", "expected_doc_ids": ["互联网保险系统数据安全规范"]}
+{"q": "S1级安全事件包括哪些例子？", "intent_l2": "insurance.security.incident", "expected_doc_ids": ["互联网保险系统数据安全规范"]}
+{"q": "保单数据在权限矩阵里对客服坐席可见范围是？", "intent_l2": "insurance.security.permission_matrix", "expected_doc_ids": ["互联网保险系统数据安全规范"]}
+{"q": "高敏数据导出需要审批几次？", "intent_l2": "oa.security.export", "expected_doc_ids": ["OA系统数据安全规范文档"]}
+{"q": "离职员工账号多久内必须停用？", "intent_l2": "oa.identity.lifecycle", "expected_doc_ids": ["OA系统数据安全规范文档"]}
+{"q": "薪酬字段主管能看到完整金额吗？", "intent_l2": "oa.permission.field_level", "expected_doc_ids": ["OA系统数据安全规范文档"]}
+{"q": "附件下载链接有效期怎么控制？", "intent_l2": "oa.security.storage", "expected_doc_ids": ["OA系统数据安全规范文档"]}
+{"q": "TLS最低版本要求是多少？", "intent_l2": "oa.security.transport", "expected_doc_ids": ["OA系统数据安全规范文档"]}
+{"q": "管理员批量导出薪酬附件会触发什么防护？", "intent_l2": "oa.security.dlp", "expected_doc_ids": ["OA系统数据安全规范文档"]}
+{"q": "RPO和RTO目标值分别是多少？", "intent_l2": "oa.resilience.backup", "expected_doc_ids": ["OA系统数据安全规范文档"]}
+{"q": "敏感数据标签存到哪里？有没有版本记录？", "intent_l2": "oa.governance.labeling", "expected_doc_ids": ["OA系统数据安全规范文档"]}

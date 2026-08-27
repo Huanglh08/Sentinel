@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+httpx
+pydantic
+pydantic-settings
+PyJWT
+python-multipart
+rank-bm25
+numpy
+faiss-cpu
+psycopg[binary]
+dashscope
+jinja2

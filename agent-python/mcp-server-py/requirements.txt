@@ -1,0 +1,7 @@
+# Ragent MCP Server (Python / FastMCP) 依赖
+# 安装： pip install -r requirements.txt
+# 运行： python server.py                  # stdio 模式（默认，供本地子进程接入）
+#        python server.py --transport sse  # SSE 模式（供 Java 端远程 http 接入）
+
+mcp>=1.2.0
+httpx>=0.27.0

@@ -1,0 +1,71 @@
+# 敏感信息文件
+token.txt
+cookie.txt
+cookie4.txt
+
+# 日志文件
+*.log
+backend.err
+backend.out
+agent_python.err
+agent_python.log
+boot.err
+mcp.err
+mcp.log
+install.err
+install.log
+package.log
+backend.log
+
+# 临时/探测文件
+probe_*.py
+probe_*.ps1
+probe_*.bat
+check_jar*.bat
+check_jar*.ps1
+ps_port*.ps1
+ps_proc*.ps1
+smoketest-*.py
+_smoketest_step1_step3.py
+chat_resp.txt
+java_procs.txt
+procs_now.txt
+
+# 启动/重启脚本（可能包含敏感路径）
+start_frontend.ps1
+restart_agent.ps1
+restart_backend_8001.ps1
+package_backend.ps1
+
+# IDE 配置
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+build/
+dist/
+*.egg
+
+# 虚拟环境
+venv/
+env/
+.env
+
+# Java/Maven
+target/
+*.class
+*.jar
+.mvn/
+mvnw
+mvnw.cmd
+
+# 系统文件
+Thumbs.db
+.DS_Store
