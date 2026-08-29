@@ -56,7 +56,7 @@ class WebSearchConfig:
 @dataclass
 class ChannelsConfig:
     """1:1 翻译 ragent SearchChannelProperties.Channels。"""
-    timeout_ms: int = 15_000
+    timeout_ms: int = 45_000  # 远程 embedding API 首次调用常见 10~20s，15s 会误杀检索导致空兜底
     vector: VectorChannelConfig = field(default_factory=VectorChannelConfig)
     keyword: KeywordChannelConfig = field(default_factory=KeywordChannelConfig)
     graph: GraphChannelConfig = field(default_factory=GraphChannelConfig)
@@ -191,7 +191,7 @@ class SearchChannelProperties:
                 supplement_ratio=_float("RAG_SEARCH_SCOPE_SUPPLEMENT_RATIO", 0.25),
             ),
             channels=ChannelsConfig(
-                timeout_ms=_int("RAG_SEARCH_CHANNELS_TIMEOUT_MS", 15_000),
+                timeout_ms=_int("RAG_SEARCH_CHANNELS_TIMEOUT_MS", 45_000),
                 vector=VectorChannelConfig(enabled=_bool("RAG_SEARCH_CHANNELS_VECTOR_ENABLED", True)),
                 keyword=KeywordChannelConfig(enabled=_bool("RAG_SEARCH_CHANNELS_KEYWORD_ENABLED", False)),
                 graph=GraphChannelConfig(enabled=_bool("RAG_SEARCH_CHANNELS_GRAPH_ENABLED", False)),

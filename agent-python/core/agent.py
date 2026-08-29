@@ -177,21 +177,20 @@ class Agent:
         if self.retriever:
             for sq, scope_resolved in per_sq_scopes:
                 _check_cancel()
-                try:
-                    context_top_k = self.search_channel_config.default_top_k
-                    hits = await self.retriever.retrieve(
-                        sq,
-                        scope_resolved.collections or None,
-                        RetrievalBudget(
-                            recall_budget=self.search_channel_config.resolve_recall_budget(context_top_k),
-                            candidate_limit=self.search_channel_config.fusion.rerank_candidate_limit,
-                            context_top_k=context_top_k,
-                        ),
-                    )
-                    kb_hits.extend(hits)
-                except Exception as e:  # noqa: BLE001
-                    _logger.warning("chat retrieve failed: %s", e)
-                    # 检索失败降级为空，不阻断生成
+                # 1:1 ragent StreamChatPipeline#retrieve: retrieval errors bubble up
+                # (channel-level fallback lives inside the engine). Silently degrading
+                # to empty evidence is what let the model fabricate citations.
+                context_top_k = self.search_channel_config.default_top_k
+                hits = await self.retriever.retrieve(
+                    sq,
+                    scope_resolved.collections or None,
+                    RetrievalBudget(
+                        recall_budget=self.search_channel_config.resolve_recall_budget(context_top_k),
+                        candidate_limit=self.search_channel_config.fusion.rerank_candidate_limit,
+                        context_top_k=context_top_k,
+                    ),
+                )
+                kb_hits.extend(hits)
 
         # 6) 来源装配（1:1 翻译 ragent SourcesAssembler.assemble）
         source_refs: list[SourceRef] = self.sources_assembler.assemble(kb_hits, self.doc_meta_provider)

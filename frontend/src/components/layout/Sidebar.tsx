@@ -2,7 +2,6 @@ import * as React from "react";
 import { differenceInCalendarDays, isValid } from "date-fns";
 import {
   BookOpen,
-  Bot,
   LogOut,
   MessageSquare,
   MoreHorizontal,
@@ -164,17 +163,15 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
       />
       <aside
         className={cn(
-          "fixed left-0 top-0 z-40 flex h-screen w-[280px] flex-shrink-0 flex-col bg-[#FAFAFA] p-3 transition-transform lg:static lg:h-screen lg:translate-x-0",
+          "fixed left-0 top-0 z-40 flex h-screen w-[280px] flex-shrink-0 flex-col bg-white/30 backdrop-blur-xl p-3 transition-transform lg:static lg:h-screen lg:translate-x-0",
           isOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
         <div className="border-b border-[#F0F0F0] pb-3">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[#3B82F6]">
-              <Bot className="h-5 w-5 text-white" />
-            </div>
+            <img src="/favicon.svg" alt="Logo" className="h-10 w-10 rounded-lg" />
             <div style={{ fontFamily: sessionTitleFont }}>
-              <p className="text-base font-semibold text-[#1A1A1A]">Ragent AI 智能体</p>
+              <p className="text-base font-semibold text-[#1A1A1A]">sentinel AI 智能体</p>
               <p className="text-xs text-[#999999]">Powered by AI</p>
             </div>
           </div>
@@ -413,7 +410,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
             <DropdownMenuContent align="start" side="top" sideOffset={8} className="w-48">
               <DropdownMenuItem asChild>
                 <a
-                  href="https://nageoffer.com/ragent"
+                  href="https://nageoffer.com/sentinel"
                   target="_blank"
                   rel="noreferrer"
                   className="flex items-center"

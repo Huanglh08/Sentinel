@@ -1,5 +1,6 @@
 import * as React from "react";
-import { Brain, ChevronDown } from "lucide-react";
+import { Brain, Check, ChevronDown, Copy, Pencil, Sparkles } from "lucide-react";
+import { toast } from "sonner";
 
 import { FeedbackButtons } from "@/components/chat/FeedbackButtons";
 import { MarkdownRenderer } from "@/components/chat/MarkdownRenderer";
@@ -8,7 +9,11 @@ import { RecommendedQuestionsButton } from "@/components/chat/RecommendedQuestio
 import { SourcesButton } from "@/components/chat/SourcesButton";
 import { ThinkingIndicator } from "@/components/chat/ThinkingIndicator";
 import { cn } from "@/lib/utils";
+import { useChatStore } from "@/stores/chatStore";
 import type { Message } from "@/types";
+
+const ASSISTANT_NAME = "Sentinel AI";
+const EDIT_TEXTAREA_MAX_HEIGHT = 320;
 
 interface MessageItemProps {
   message: Message;
@@ -38,20 +43,164 @@ export const MessageItem = React.memo(function MessageItem({ message }: MessageI
   const hasContent = message.content.trim().length > 0;
   const isWaiting = message.status === "streaming" && !isThinking && !hasContent;
 
+  const editUserMessage = useChatStore((state) => state.editUserMessage);
+  const isStreaming = useChatStore((state) => state.isStreaming);
+  const [isEditing, setIsEditing] = React.useState(false);
+  const [draft, setDraft] = React.useState(message.content);
+  const editRef = React.useRef<HTMLTextAreaElement | null>(null);
+
+  const resizeEdit = React.useCallback(() => {
+    const el = editRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, EDIT_TEXTAREA_MAX_HEIGHT)}px`;
+  }, []);
+
+  React.useEffect(() => {
+    if (!isEditing) return;
+    resizeEdit();
+    const el = editRef.current;
+    if (!el) return;
+    el.focus({ preventScroll: true });
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, [isEditing, resizeEdit]);
+
+  const startEdit = React.useCallback(() => {
+    if (isStreaming) return;
+    setDraft(message.content);
+    setIsEditing(true);
+  }, [isStreaming, message.content]);
+
+  const cancelEdit = React.useCallback(() => {
+    setDraft(message.content);
+    setIsEditing(false);
+  }, [message.content]);
+
+  // 保存后立刻退出编辑态 由 store 截断该条之后的消息并重新发送 避免按钮停在 loading 观感
+  const saveEdit = React.useCallback(() => {
+    const trimmed = draft.trim();
+    if (!trimmed || isStreaming) return;
+    setIsEditing(false);
+    if (trimmed === message.content.trim()) return;
+    void editUserMessage(message.id, trimmed);
+  }, [draft, isStreaming, message.content, message.id, editUserMessage]);
+
+  const handleCopy = React.useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(message.content);
+      toast.success("复制成功");
+    } catch {
+      toast.error("复制失败");
+    }
+  }, [message.content]);
+
   if (isUser) {
     return (
-      <div className="flex">
-        <div className="user-message">
-          <p className="whitespace-pre-wrap break-words">{message.content}</p>
-        </div>
+      <div className="group flex flex-col items-end">
+        {isEditing ? (
+          <div className="w-full max-w-[80%] rounded-2xl border border-[#E5E5E5] bg-white p-3 shadow-[0_4px_12px_rgba(0,0,0,0.06)]">
+            <textarea
+              ref={editRef}
+              value={draft}
+              onChange={(event) => {
+                setDraft(event.target.value);
+                resizeEdit();
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  cancelEdit();
+                  return;
+                }
+                if (event.key === "Enter" && !event.shiftKey) {
+                  const nativeEvent = event.nativeEvent as KeyboardEvent;
+                  // 输入法组合态下 Enter 用于选词 不能当作保存
+                  if (nativeEvent.isComposing || nativeEvent.keyCode === 229) return;
+                  event.preventDefault();
+                  saveEdit();
+                }
+              }}
+              rows={1}
+              aria-label="编辑消息"
+              className="w-full resize-none border-0 bg-transparent text-[15px] leading-relaxed text-[#333333] outline-none"
+            />
+            <div className="mt-2 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={cancelEdit}
+                className="rounded-lg px-3 py-1.5 text-xs font-medium text-[#666666] transition-colors hover:bg-[#F5F5F5]"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={saveEdit}
+                disabled={!draft.trim() || isStreaming}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-white transition-colors",
+                  !draft.trim() || isStreaming
+                    ? "cursor-not-allowed bg-[#C7D7F5]"
+                    : "bg-[#3B82F6] hover:bg-[#2563EB]"
+                )}
+              >
+                <Check className="h-3.5 w-3.5" />
+                保存并重发
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="user-message">
+              <p className="whitespace-pre-wrap break-words">{message.content}</p>
+            </div>
+            <div className="mt-1.5 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 pointer-events-none focus-within:pointer-events-auto focus-within:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100">
+              <button
+                type="button"
+                onClick={handleCopy}
+                aria-label="复制"
+                title="复制"
+                className="flex h-7 w-7 items-center justify-center rounded-md text-[#999999] transition-colors hover:bg-[#F5F5F5] hover:text-[#666666]"
+              >
+                <Copy className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={startEdit}
+                disabled={isStreaming}
+                aria-label="编辑"
+                title={isStreaming ? "生成中无法编辑" : "编辑"}
+                className={cn(
+                  "flex h-7 w-7 items-center justify-center rounded-md transition-colors",
+                  isStreaming
+                    ? "cursor-not-allowed text-[#DDDDDD]"
+                    : "text-[#999999] hover:bg-[#F5F5F5] hover:text-[#666666]"
+                )}
+              >
+                <Pencil className="h-4 w-4" />
+              </button>
+            </div>
+          </>
+        )}
       </div>
     );
   }
 
   const thinkingDuration = message.thinkingDuration ? `${message.thinkingDuration}秒` : "";
   return (
-    <div className="group flex">
+    <div className="group flex gap-3">
+      <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#60A5FA] to-[#2563EB] text-white shadow-sm">
+        <Sparkles className="h-4 w-4" />
+      </div>
       <div className="min-w-0 flex-1 space-y-4">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold text-[#1F2937]">{ASSISTANT_NAME}</span>
+          {message.isDeepThinking ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-[#EFF6FF] px-2 py-0.5 text-[11px] font-medium text-[#2563EB]">
+              <Brain className="h-3 w-3" />
+              深度思考
+            </span>
+          ) : null}
+        </div>
         {isThinking ? (
           <ThinkingIndicator content={message.thinking} duration={message.thinkingDuration} />
         ) : null}

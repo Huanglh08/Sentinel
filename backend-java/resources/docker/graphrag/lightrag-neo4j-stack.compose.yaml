@@ -1,19 +1,17 @@
 name: lightrag-neo4j-stack
 
-# 知识图谱检索栈：Neo4j（图存储）+ LightRAG（构建 / 检索微服务）
-# KV / 向量 / 文档状态复用宿主机现有 PostgreSQL（pgvector 已装），本栈只新增 Neo4j + LightRAG 两进程
+# 鐭ヨ瘑鍥捐氨妫�绱㈡爤锛歂eo4j锛堝浘瀛樺偍锛? LightRAG锛堟瀯寤?/ 妫�绱㈠井鏈嶅姟锛?# KV / 鍚戦噺 / 鏂囨。鐘舵�佸�嶇敤瀹夸富鏈虹幇鏈� PostgreSQL锛坧gvector 宸茶�咃級锛屾湰鏍堝彧鏂板�?Neo4j + LightRAG 涓よ繘绋?#
+# 涓庡悗绔�瀵规帴锛歛pplication.yaml 缃?rag.graph.type=lightrag銆乺ag.graph.lightrag.base-url=http://127.0.0.1:9621
+# 涓�鎬у寲鍙傛暟浠庡悓鐩�褰� .env 璇诲彇锛堟ā鏉胯�� .env.example锛夛紱LightRAG 涓嶅惎鐢?API 閴存潈
 #
-# 与后端对接：application.yaml 置 rag.graph.type=lightrag、rag.graph.lightrag.base-url=http://127.0.0.1:9621
-# 个性化参数从同目录 .env 读取（模板见 .env.example）；LightRAG 不启用 API 鉴权
-#
-# IDEA：复制 .env.example 为 .env 并填写密钥后，直接点击本文件的 Compose 启动按钮
-# Neo4j Browser http://localhost:7474 ｜ LightRAG WebUI http://localhost:9621/webui
+# IDEA锛氬�嶅�?.env.example 涓?.env 骞跺～鍐欏瘑閽ュ悗锛岀洿鎺ョ偣鍑绘湰鏂囦欢鐨?Compose 鍚�鍔ㄦ寜閽�
+# Neo4j Browser http://localhost:7474 锝?LightRAG WebUI http://localhost:9621/webui
 
 services:
   neo4j:
     container_name: neo4j
-    # GDS 固定进本地镜像，避免官方插件安装器在每次重启时重新联网下载 62 MB JAR
-    image: ragent/neo4j-gds:5.26-2.13.11
+    # GDS 鍥哄畾杩涙湰鍦伴暅鍍忥紝閬垮厤瀹樻柟鎻掍欢瀹夎�呭櫒鍦ㄦ瘡娆￠噸鍚�鏃堕噸鏂拌仈缃戜笅杞?62 MB JAR
+    image: sentinel/neo4j-gds:5.26-2.13.11
     build:
       context: .
       dockerfile: neo4j-gds.Dockerfile
@@ -22,8 +20,7 @@ services:
       - "7687:7687"   # Bolt
     environment:
       NEO4J_AUTH: "${NEO4J_USERNAME:-neo4j}/${NEO4J_PASSWORD:?NEO4J_PASSWORD is required}"
-      # APOC 已随 Neo4j 镜像提供；GDS 由 neo4j-gds.Dockerfile 固定，不再放入此运行时下载列表
-      NEO4J_PLUGINS: '["apoc"]'
+      # APOC 宸查殢 Neo4j 闀滃儚鎻愪緵锛汫DS 鐢?neo4j-gds.Dockerfile 鍥哄畾锛屼笉鍐嶆斁鍏ユ�よ繍琛屾椂涓嬭浇鍒楄�?      NEO4J_PLUGINS: '["apoc"]'
       NEO4J_dbms_security_procedures_unrestricted: "apoc.*,gds.*"
       NEO4J_server_memory_heap_max__size: "1G"
       NEO4J_server_memory_pagecache_size: "512m"
@@ -40,13 +37,10 @@ services:
 
   lightrag:
     container_name: lightrag
-    # ⚠️ 生产务必 pin 到已验证的具体 tag（社区仓库存在超前日期版本 / 虚构模型名，勿长期用 latest）
-    image: ghcr.io/hkuds/lightrag:${LIGHTRAG_IMAGE_TAG:-latest}
+    # 鈿狅笍 鐢熶骇鍔″繀 pin 鍒板凡楠岃瘉鐨勫叿浣?tag锛堢ぞ鍖轰粨搴撳瓨鍦ㄨ秴鍓嶆棩鏈熺増鏈?/ 铏氭瀯妯″瀷鍚嶏紝鍕块暱鏈熺敤 latest锛?    image: ghcr.io/hkuds/lightrag:${LIGHTRAG_IMAGE_TAG:-latest}
     ports:
       - "9621:9621"
-    # Docker Desktop / IDEA 可能独立重启容器，绕过 depends_on 的就绪顺序。
-    # 将等待门闩放在 LightRAG 容器内部，确保 Neo4j Bolt 就绪后才启动应用。
-    entrypoint:
+    # Docker Desktop / IDEA 鍙�鑳界嫭绔嬮噸鍚�瀹瑰櫒锛岀粫杩?depends_on 鐨勫氨缁�椤哄簭銆?    # 灏嗙瓑寰呴棬闂╂斁鍦?LightRAG 瀹瑰櫒鍐呴儴锛岀‘淇?Neo4j Bolt 灏辩华鍚庢墠鍚�鍔ㄥ簲鐢ㄣ�?    entrypoint:
       - /bin/sh
       - -ec
       - |
@@ -59,22 +53,19 @@ services:
     environment:
       WORKING_DIR: "/app/data/rag_storage"
       INPUT_DIR: "/app/data/inputs"
-      # —— LLM 与后端默认模型一致使用百炼；Embedding 使用 SiliconFlow ——
-      LLM_BINDING: "${LLM_BINDING:-openai}"
+      # 鈥斺�?LLM 涓庡悗绔�榛樿�ゆā鍨嬩竴鑷翠娇鐢ㄧ櫨鐐硷紱Embedding 浣跨敤 SiliconFlow 鈥斺�?      LLM_BINDING: "${LLM_BINDING:-openai}"
       LLM_BINDING_HOST: "${LLM_BINDING_HOST:-https://dashscope.aliyuncs.com/compatible-mode/v1}"
       LLM_BINDING_API_KEY: "${BAILIAN_API_KEY:?BAILIAN_API_KEY is required}"
       LLM_MODEL: "${LLM_MODEL:-qwen-plus-latest}"
-      # 实体 / 关系的描述与摘要输出语言，LightRAG 默认 English；本项目为中文库故置中文
-      # 仅对改后新建 / 重建的索引生效，已抽取出的英文描述需重建索引才会转为中文
-      SUMMARY_LANGUAGE: "${SUMMARY_LANGUAGE:-简体中文}"
+      # 瀹炰綋 / 鍏崇郴鐨勬弿杩颁笌鎽樿�佽緭鍑鸿��瑷�锛孡ightRAG 榛樿�� English锛涙湰椤圭洰涓轰腑鏂囧簱鏁呯疆涓�鏂�
+      # 浠呭�规敼鍚庢柊寤� / 閲嶅缓鐨勭储寮曠敓鏁堬紝宸叉娊鍙栧嚭鐨勮嫳鏂囨弿杩伴渶閲嶅缓绱㈠紩鎵嶄細杞�涓轰腑鏂�
+      SUMMARY_LANGUAGE: "${SUMMARY_LANGUAGE:-绠�浣撲腑鏂噠"
       EMBEDDING_BINDING: "${EMBEDDING_BINDING:-openai}"
       EMBEDDING_BINDING_HOST: "${EMBEDDING_BINDING_HOST:-https://api.siliconflow.cn/v1}"
       EMBEDDING_BINDING_API_KEY: "${SILICONFLOW_API_KEY:?SILICONFLOW_API_KEY is required}"
       EMBEDDING_MODEL: "${EMBEDDING_MODEL:-Qwen/Qwen3-Embedding-8B}"
-      EMBEDDING_DIM: "${EMBEDDING_DIM:-1536}" # 与 application.yaml 的 rag.default.dimension 一致
-      EMBEDDING_SEND_DIM: "true"  # 要求 SiliconFlow 实际返回 1536 维，而非模型默认维度
-      # —— 存储：图 = Neo4j；KV / 向量 / 文档状态 = 复用宿主 PostgreSQL ——
-      LIGHTRAG_GRAPH_STORAGE: "Neo4JStorage"
+      EMBEDDING_DIM: "${EMBEDDING_DIM:-1536}" # 涓?application.yaml 鐨?rag.default.dimension 涓�鑷?      EMBEDDING_SEND_DIM: "true"  # 瑕佹眰 SiliconFlow 瀹為檯杩斿洖 1536 缁达紝鑰岄潪妯″瀷榛樿�ょ淮搴�
+      # 鈥斺�?瀛樺偍锛氬浘 = Neo4j锛汯V / 鍚戦噺 / 鏂囨。鐘舵�?= 澶嶇敤瀹夸富 PostgreSQL 鈥斺�?      LIGHTRAG_GRAPH_STORAGE: "Neo4JStorage"
       LIGHTRAG_KV_STORAGE: "PGKVStorage"
       LIGHTRAG_VECTOR_STORAGE: "PGVectorStorage"
       LIGHTRAG_DOC_STATUS_STORAGE: "PGDocStatusStorage"
@@ -86,9 +77,9 @@ services:
       POSTGRES_PORT: "${POSTGRES_PORT:-5432}"
       POSTGRES_USER: "${POSTGRES_USER:-postgres}"
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}"
-      POSTGRES_DATABASE: "${POSTGRES_DATABASE:-ragent}"
+      POSTGRES_DATABASE: "${POSTGRES_DATABASE:-sentinel}"
     extra_hosts:
-      - "host.docker.internal:host-gateway"   # Linux 也能解析宿主机；Mac/Win 原生支持
+      - "host.docker.internal:host-gateway"   # Linux 涔熻兘瑙ｆ瀽瀹夸富鏈猴紱Mac/Win 鍘熺敓鏀�鎸�
     volumes:
       - lightrag-data:/app/data
     depends_on:

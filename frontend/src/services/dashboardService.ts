@@ -20,6 +20,11 @@ export type DashboardOverview = {
   };
 };
 
+export type DashboardNameCount = {
+  name: string;
+  count: number;
+};
+
 export type DashboardPerformance = {
   window: string;
   avgLatencyMs: number;
@@ -28,6 +33,19 @@ export type DashboardPerformance = {
   errorRate: number;
   noDocRate: number;
   slowRate: number;
+  // v3 新增
+  avgTtftMs?: number;
+  p95TtftMs?: number;
+  avgTps?: number;
+  outputTokens?: number;
+  autonomyRate?: number;
+  refusalRate?: number;
+  toolCallSuccessRate?: number;
+  likeCount?: number;
+  dislikeCount?: number;
+  likeRate?: number;
+  riskCategories?: DashboardNameCount[];
+  outcomeDistribution?: DashboardNameCount[];
 };
 
 export type DashboardTrendPoint = {

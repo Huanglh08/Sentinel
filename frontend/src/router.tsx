@@ -22,6 +22,7 @@ import { QueryTermMappingPage } from "@/pages/admin/query-term-mapping/QueryTerm
 import { AgentProfilePage } from "@/pages/admin/agents/AgentProfilePage";
 import { AgentPromptPage } from "@/pages/admin/agents/AgentPromptPage";
 import { UserListPage } from "@/pages/admin/users/UserListPage";
+import { CaseInvestigationPage } from "@/pages/admin/case-investigation/CaseInvestigationPage";
 import { useAuthStore } from "@/stores/authStore";
 
 function RequireAuth({ children }: { children: JSX.Element }) {
@@ -180,6 +181,10 @@ export const router = createBrowserRouter([
       {
         path: "users",
         element: <UserListPage />
+      },
+      {
+        path: "case-investigation",
+        element: <CaseInvestigationPage />
       }
     ]
   },

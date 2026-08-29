@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from core.agent import Agent
+from core.case import CaseInvestigationAgent
 from core.chunk.chunker import chunk_file
 from core.config import AppSettings, RAGConfigProperties, SearchChannelProperties
 from core.embedding import EmbeddingConfig, ModelHealthStore as EmbeddingHealthStore, ModelRoutingExecutor as EmbeddingRoutingExecutor, RoutingEmbeddingService
@@ -54,7 +55,7 @@ from core.admin import (
     build_knowledge_base_router, build_knowledge_document_router, build_knowledge_chunk_router)
 from core.demo_mode import DemoModeMiddleware, DemoModeProperties
 from core.ratelimit import ChatQueueLimiter, FairDistributedRateLimiter, RAGRateLimitProperties
-from core.memory.store import JdbcConversationMemoryStore, DefaultConversationMemoryService, ConversationRepository
+from core.memory.store import JdbcConversationMemoryStore, DefaultConversationMemoryService, ConversationRepository, next_message_id
 
 _logger = logging.getLogger("sentinel.api")
 _settings = AppSettings()
@@ -79,6 +80,13 @@ class ChatRequest(BaseModel):
 
 class TitleRequest(BaseModel):
     question: str = Field(min_length=1, max_length=20000)
+
+
+class CaseInvestigateRequest(BaseModel):
+    """案件调查请求：告警/线索文本 -> 自主调查 -> 结构化报告。"""
+
+    clue: str = Field(min_length=5, max_length=20000, description="告警/线索原文")
+    source: str = Field(default="MANUAL", max_length=32, description="线索来源: MANUAL/WEBHOOK/SCAN")
 
 
 class RecommendRequest(BaseModel):
@@ -140,16 +148,24 @@ async def lifespan(application: FastAPI):
     application.state.intent_cache_manager = None
     application.state.intent_redis = None
     application.state.task_registry = {}
-    # 1:1 翻译 ragent ChatQueueLimiter 初始化
+    # 1:1 ragent ChatQueueLimiter/FairDistributedRateLimiter bean init
     rate_limit_properties = RAGRateLimitProperties.from_env()
     fair_limiter = FairDistributedRateLimiter(
-        global_enabled=rate_limit_properties.global_enabled,
-        global_max_concurrent=rate_limit_properties.global_max_concurrent,
-        global_max_wait_ms=rate_limit_properties.global_max_wait_ms,
-        user_enabled=rate_limit_properties.user_enabled,
-        user_max_concurrent=rate_limit_properties.user_max_concurrent,
+        name="sentinel:rag:chat",
+        redis_url=getattr(_settings, "redis_url", None),
+        max_permits=rate_limit_properties.global_max_concurrent,
+        lease_seconds=rate_limit_properties.global_lease_seconds,
+        poll_interval_ms=rate_limit_properties.global_poll_interval_ms,
     )
     application.state.queue_limiter = ChatQueueLimiter(fair_limiter)
+    application.state.rate_limit_properties = rate_limit_properties
+    # 1:1 ragent @PostConstruct: start limiter lifecycle inside the event loop
+    try:
+        await fair_limiter.start()
+    except Exception as exc:  # noqa: BLE001
+        # Redis unreachable: skip queue limiting instead of failing startup
+        _logger.warning("queue limiter disabled (redis unavailable): %s", exc)
+        application.state.queue_limiter = None
     # 1:1 翻译 ragent ConversationMemoryService 初始化
     memory_repo = ConversationRepository()
     memory_store = JdbcConversationMemoryStore(repo=memory_repo)
@@ -662,6 +678,102 @@ async def me(user=Depends(get_current_user)):
     return user.model_dump()
 
 
+# ---------------------------------------------------------------------------
+# 案件调查（Phase 1）：/case/investigate SSE + 案件查询。纯增量，不影响 /chat。
+# ---------------------------------------------------------------------------
+def _get_case_agent(request: Request) -> CaseInvestigationAgent:
+    """懒加载案件调查 Agent：复用主 Agent 的 llm/mcp 实例（共享路由与 MCP 降级底座）。"""
+    case_agent = getattr(request.app.state, "case_agent", None)
+    if case_agent is None:
+        main_agent: Agent = request.app.state.agent
+        case_agent = CaseInvestigationAgent(main_agent.llm, main_agent.mcp)
+        request.app.state.case_agent = case_agent
+    return case_agent
+
+
+@app.post("/case/investigate")
+async def case_investigate(payload: CaseInvestigateRequest, request: Request, user=Depends(get_current_user)):
+    """线索 -> 分诊 -> 受控多步调查 -> 结构化报告（SSE 逐步推送证据链）。"""
+    case_agent = _get_case_agent(request)
+    user_id = getattr(user, "username", None) or getattr(user, "id", None) or "anonymous"
+
+    async def events() -> AsyncIterator[str]:
+        try:
+            async for event in case_agent.investigate(payload.clue, user_id=str(user_id), source=payload.source):
+                if await request.is_disconnected():
+                    raise asyncio.CancelledError()
+                yield f"event: message\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+            yield "event: end\ndata: {\"status\": \"done\"}\n\n"
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            _logger.exception("case investigate failed")
+            yield f"event: error\ndata: {json.dumps({'success': False, 'code': 'CASE_ERROR', 'message': str(exc)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+class ApprovalDecideRequest(BaseModel):
+    """审批裁决请求。"""
+
+    decision: str = Field(pattern="^(APPROVED|REJECTED)$")
+    operator: str = Field(default="", max_length=64)
+    opinion: str = Field(default="", max_length=1024)
+
+
+@app.get("/case/approvals")
+async def approval_list(
+    request: Request,
+    user=Depends(get_current_user),
+    case_id: str = "",
+    status: str = "",
+    limit: int = 100,
+):
+    """审批待办列表（管理端视角；case_id/status 可选过滤）。
+
+    注意：必须定义在 GET /case/{case_id} 之前，否则路径参数会把
+    /case/approvals 吞掉（FastAPI 按注册顺序匹配）。
+    """
+    case_agent = _get_case_agent(request)
+    return {
+        "approvals": case_agent.store.list_approvals(
+            case_id=case_id, status=status, limit=min(max(limit, 1), 200)
+        )
+    }
+
+
+@app.post("/case/approvals/{approval_id}/decide")
+async def approval_decide(
+    approval_id: str, payload: ApprovalDecideRequest, request: Request, user=Depends(get_current_user)
+):
+    """审批裁决：APPROVED / REJECTED。重复裁决幂等返回当前状态。"""
+    case_agent = _get_case_agent(request)
+    operator = getattr(user, "username", None) or getattr(user, "id", None) or "anonymous"
+    result = case_agent.store.decide_approval(
+        approval_id, status=payload.decision, operator=str(operator), opinion=payload.opinion
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="approval not found")
+    return result
+
+
+@app.get("/case/{case_id}")
+async def case_detail(case_id: str, request: Request, user=Depends(get_current_user)):
+    """查询单个案件（含证据链全量）。"""
+    case_agent = _get_case_agent(request)
+    case = case_agent.store.get_case(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="case not found")
+    return case
+
+
+@app.get("/cases")
+async def case_list(request: Request, user=Depends(get_current_user), limit: int = 20):
+    """案件列表（最近优先）。"""
+    case_agent = _get_case_agent(request)
+    return {"cases": case_agent.store.list_cases(limit=min(max(limit, 1), 100))}
+
+
 @app.post("/chat")
 async def chat(payload: ChatRequest, request: Request, user=Depends(get_current_user)):
     """1:1 翻译 ragent RAGChatServiceImpl.streamChat：集成 ChatQueueLimiter。
@@ -677,12 +789,20 @@ async def chat(payload: ChatRequest, request: Request, user=Depends(get_current_
     task_id = payload.taskId or payload.conversationId or request_id or str(id(asyncio.current_task()))
     user_id = getattr(user, "username", None) or getattr(user, "id", None) or "anonymous"
 
+    # 1:1 ragent RAGChatServiceImpl#streamChat: generate snowflake id when blank,
+    # so first-turn messages persist and clients can read the id from meta frame
+    if not payload.conversationId:
+        payload.conversationId = next_message_id()
+
     # 1:1 翻译 ragent ChatQueueLimiter.enqueue：队列限流入口
-    if queue_limiter is not None:
+    # ticket_holder must exist unconditionally: events().finally references it
+    # even when the limiter is disabled
+    ticket_holder: list = []
+    rate_limit_props = getattr(request.app.state, "rate_limit_properties", None)
+    if queue_limiter is not None and (rate_limit_props is None or rate_limit_props.global_enabled):
         loop = asyncio.get_event_loop()
         acquired = asyncio.Event()
         rejected = asyncio.Event()
-        ticket_holder: list = []
 
         def _on_acquire(ticket):
             ticket_holder.append(ticket)
@@ -695,7 +815,8 @@ async def chat(payload: ChatRequest, request: Request, user=Depends(get_current_
             None,
             lambda: queue_limiter.enqueue_or_reject(
                 request_id=task_id,
-                max_wait_ms=30000,  # 30秒等待超时
+                # 1:1 ragent ChatQueueLimiter: TimeUnit.SECONDS.toMillis(getGlobalMaxWaitSeconds())
+                max_wait_ms=rate_limit_props.global_max_wait_seconds * 1000 if rate_limit_props else 30000,
                 on_acquired=_on_acquire,
                 on_rejected=_on_reject,
             ),
@@ -708,11 +829,12 @@ async def chat(payload: ChatRequest, request: Request, user=Depends(get_current_
             t.cancel()
 
         if rejected.is_set():
-            # 1:1 翻译 ragent handleReject：返回拒绝消息
-            reject_msg = "系统繁忙，请稍后再试"
-            yield f"event: reject\ndata: {json.dumps({'type': 'response', 'delta': reject_msg}, ensure_ascii=False)}\n\n"
-            yield f"event: end\ndata: {json.dumps({'status': 'rejected', 'request_id': request_id}, ensure_ascii=False)}\n\n"
-            return
+            # 1:1 翻译 ragent handleReject：返回独立的拒绝消息 SSE 流（chat 本身保持普通函数）
+            async def reject_events() -> AsyncIterator[str]:
+                reject_msg = "系统繁忙，请稍后再试"
+                yield f"event: reject\ndata: {json.dumps({'type': 'response', 'delta': reject_msg}, ensure_ascii=False)}\n\n"
+                yield f"event: end\ndata: {json.dumps({'status': 'rejected', 'request_id': request_id}, ensure_ascii=False)}\n\n"
+            return StreamingResponse(reject_events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     async def events() -> AsyncIterator[str]:
         cancelled = threading.Event()
@@ -728,8 +850,11 @@ async def chat(payload: ChatRequest, request: Request, user=Depends(get_current_
         }
         full_text_parts: list[str] = []
         try:
-            # 1:1 翻译 ragent loadMemory：加载会话记忆
-            if memory_service is not None and payload.conversationId:
+            # g2 layered mode: persistence (user/assistant messages + conversation
+            # record) belongs to the Java gateway (PythonRAGChatServiceImpl, the
+            # counterpart of ragent RAGChatServiceImpl). This endpoint only loads
+            # history for generation context; persisting here would duplicate rows.
+            if memory_service is not None:
                 try:
                     history_messages = memory_service.load(payload.conversationId, str(user_id))
                     if history_messages and not payload.history:
@@ -768,17 +893,7 @@ async def chat(payload: ChatRequest, request: Request, user=Depends(get_current_
                 yield f"event: sources\ndata: {json.dumps({'sources': sources, 'grounding_chunks': grounding_chunks}, ensure_ascii=False)}\n\n"
                 yield f"event: complete\ndata: {json.dumps({'full_text': full_text, 'sources': sources, 'grounding_chunks': grounding_chunks}, ensure_ascii=False)}\n\n"
                 yield f"event: end\ndata: {json.dumps({'status': 'done', 'request_id': request_id}, ensure_ascii=False)}\n\n"
-
-                # 1:1 翻译 ragent memoryService.append：保存消息到记忆
-                if memory_service is not None and payload.conversationId:
-                    try:
-                        from core.memory.types import ChatMessage, Role
-                        user_msg = ChatMessage(role=Role.USER, content=payload.question)
-                        memory_service.append(payload.conversationId, str(user_id), user_msg)
-                        assistant_msg = ChatMessage(role=Role.ASSISTANT, content=full_text)
-                        memory_service.append(payload.conversationId, str(user_id), assistant_msg)
-                    except Exception as e:
-                        _logger.warning("append memory failed: %s", e)
+                # Assistant persistence is handled by the Java gateway; no double write here.
         except asyncio.CancelledError:
             _logger.info("chat cancelled request_id=%s task_id=%s", request_id, task_id)
             raise

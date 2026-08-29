@@ -251,7 +251,12 @@ export function MessageList({ messages, isLoading, isStreaming, sessionKey }: Me
       ({ className, ...props }, ref) => (
         <div
           ref={ref}
-          className={cn("mx-auto max-w-[840px] space-y-10 px-6 pt-10 pb-2 md:px-8", className)}
+          // 不能用 space-y-* 做条目间距：它靠相邻兄弟选择器加 margin-top，
+          // 而 Virtuoso 会卸载滚出视口的条目，间距随之时有时无，总高度反复跳变一个间距值。
+          // 间距改由 itemContent 自身 padding-bottom 承担，高度自包含后测量才稳定。
+          // 顶部留白同样不能写在这里：Virtuoso 会在 List 上写内联 padding-top 做滚动补偿，
+          // 内联样式优先级高于 class，任何 pt-* 都会被它覆盖且随滚动变化
+          className={cn("mx-auto max-w-[840px] px-6 pb-0 md:px-8", className)}
           {...props}
         />
       )
@@ -261,8 +266,17 @@ export function MessageList({ messages, isLoading, isStreaming, sessionKey }: Me
   }, []);
 
   const Footer = React.useMemo(() => {
-    const Comp = () => <div aria-hidden="true" className="h-8" />;
+    // 条目自身已带 pb-10，此处只补一点呼吸量，避免末条与输入框之间留白过大
+    const Comp = () => <div aria-hidden="true" className="h-2" />;
     Comp.displayName = "MessageListFooter";
+    return Comp;
+  }, []);
+
+  // 顶部留白走 Virtuoso 的 Header 插槽：它是列表内的真实 DOM 元素，
+  // 不受 Virtuoso 写在 List 上的内联 padding-top 影响，间距才稳定可控
+  const Header = React.useMemo(() => {
+    const Comp = () => <div aria-hidden="true" className="h-14" />;
+    Comp.displayName = "MessageListHeader";
     return Comp;
   }, []);
 
@@ -290,11 +304,11 @@ export function MessageList({ messages, isLoading, isStreaming, sessionKey }: Me
         totalListHeightChanged={handleTotalListHeightChanged}
         rangeChanged={handleRangeChanged}
         className="h-full"
-        components={{ List, Footer }}
+        components={{ List, Header, Footer }}
         itemContent={(index, message) => (
           <div
             data-message-id={message.id}
-            className={cn(index === messages.length - 1 && "animate-fade-up")}
+            className={cn("pb-10", index === messages.length - 1 && "animate-fade-up")}
             onMouseDown={handleTripleClickDown}
           >
             <MessageItem message={message} />

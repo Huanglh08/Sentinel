@@ -28,6 +28,14 @@ def _join_url(base: str, path: str) -> str:
     return base + path
 
 
+# 模块级连接池:复用 TCP+TLS 连接(keepalive)。此前每次 httpx.post 新建连接,
+# 对远程 embedding API 的握手开销导致单次调用 0.2s~20s 的巨大抖动。
+_HTTP_CLIENT = httpx.Client(
+    timeout=60.0,
+    limits=httpx.Limits(max_connections=32, max_keepalive_connections=8, keepalive_expiry=120.0),
+)
+
+
 class OpenAIStyleEmbeddingClient(BaseEmbeddingClient):
     """OpenAI 兼容协议抽象基类——严格对应 ragent AbstractOpenAIStyleEmbeddingClient。
 
@@ -60,7 +68,7 @@ class OpenAIStyleEmbeddingClient(BaseEmbeddingClient):
         timeout_s = (target.timeout_ms / 1000.0) if target.timeout_ms else self.DEFAULT_TIMEOUT_S
 
         try:
-            resp = httpx.post(url, headers=headers, json=body, timeout=timeout_s)
+            resp = _HTTP_CLIENT.post(url, headers=headers, json=body, timeout=timeout_s)
         except httpx.TimeoutException as e:
             raise ModelClientError(
                 f"嵌入请求超时: {url} ({timeout_s}s)",

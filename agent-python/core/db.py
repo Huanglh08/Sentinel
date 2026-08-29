@@ -12,7 +12,7 @@ import threading
 
 _logger = logging.getLogger("sentinel.db")
 
-_DEFAULT_DSN = "postgresql://postgres:postgres@127.0.0.1:5432/ragent?client_encoding=UTF8"
+_DEFAULT_DSN = "postgresql://postgres:postgres@127.0.0.1:5432/sentinel?client_encoding=UTF8"
 
 _lock = threading.Lock()
 _pool = None

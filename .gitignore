@@ -69,3 +69,18 @@ mvnw.cmd
 # 系统文件
 Thumbs.db
 .DS_Store
+
+# 错误输出/临时探针/备份（Phase 开发期产物）
+*.err
+_dbprobe.py
+_probe.py
+_probe_*.txt
+check_trace_tmp.py
+agent-python-broken-backup.patch
+backend-java.broken/
+agent-python/eval/reports/
+
+# 工具数据
+node_modules/
+.codebuddy/
+.playwright-cli/

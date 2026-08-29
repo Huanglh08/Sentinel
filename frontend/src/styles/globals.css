@@ -293,7 +293,10 @@ html.dark *::-webkit-scrollbar-thumb:hover {
   }
 
   .admin-layout .admin-main {
-    @apply flex-1 bg-[#F3F4F6];
+    flex: 1;
+    background-image: url("/backgrounds/bg-4-pastel.png");
+    background-size: cover;
+    background-position: center;
   }
 
   .admin-layout .admin-content {

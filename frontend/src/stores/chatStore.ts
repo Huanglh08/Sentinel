@@ -50,6 +50,7 @@ interface ChatState {
   updateSessionTitle: (sessionId: string, title: string) => void;
   setDeepThinkingEnabled: (enabled: boolean) => void;
   sendMessage: (content: string) => Promise<void>;
+  editUserMessage: (messageId: string, content: string) => Promise<void>;
   cancelGeneration: () => void;
   appendStreamContent: (delta: string) => void;
   appendThinkingContent: (delta: string) => void;
@@ -496,6 +497,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
         });
       }
     }
+  },
+  // 编辑历史提问：截断该条及其之后的所有消息，再以新内容走一次正常发送流程
+  // 后端暂无「就地改写历史消息」接口，故此处只维护前端视图，服务端会话里会追加一轮新问答
+  editUserMessage: async (messageId, content) => {
+    const trimmed = content.trim();
+    if (!trimmed) return;
+    if (get().isStreaming) return;
+    const state = get();
+    const index = state.messages.findIndex(
+      (message) => message.id === messageId && message.role === "user"
+    );
+    if (index < 0) return;
+    if (state.messages[index].content.trim() === trimmed) return;
+    const kept = state.messages.slice(0, index);
+    set({
+      messages: kept,
+      openedSourceMessageId: kept.some((message) => message.id === state.openedSourceMessageId)
+        ? state.openedSourceMessageId
+        : null
+    });
+    await get().sendMessage(trimmed);
   },
   cancelGeneration: () => {
     const { isStreaming, streamTaskId } = get();

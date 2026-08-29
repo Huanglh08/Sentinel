@@ -12,10 +12,13 @@ import {
   AlertCircle,
   BarChart3,
   Clock,
+  Gauge,
   Info,
   Lightbulb,
   MessageSquare,
   RefreshCw,
+  ShieldCheck,
+  ThumbsUp,
   Timer,
   TrendingDown,
   TrendingUp,
@@ -36,6 +39,7 @@ import {
   getDashboardOverview,
   getDashboardPerformance,
   getDashboardTrends,
+  type DashboardNameCount,
   type DashboardOverview,
   type DashboardPerformance,
   type DashboardTrends
@@ -165,6 +169,22 @@ const getLatencyStatus = (value?: number | null): MetricTone => {
   if (value === null || value === undefined) return "warning";
   if (value <= DASHBOARD_THRESHOLDS.latency.good) return "good";
   if (value <= DASHBOARD_THRESHOLDS.latency.warning) return "warning";
+  return "bad";
+};
+
+// v3：TTFT 阈值（业界基准：p95 < 2s 合格，> 5s 差）
+const getTtftStatus = (value?: number | null): MetricTone => {
+  if (value === null || value === undefined) return "warning";
+  if (value <= 2000) return "good";
+  if (value <= 5000) return "warning";
+  return "bad";
+};
+
+// v3：生成速度阈值（业界基准：>= 20 tok/s 流畅）
+const getTpsStatus = (value?: number | null): MetricTone => {
+  if (value === null || value === undefined) return "warning";
+  if (value >= 20) return "good";
+  if (value >= 10) return "warning";
   return "bad";
 };
 
@@ -1072,6 +1092,62 @@ const QualitySnapshot = ({
   );
 };
 
+// v3：安全垂类面板——回答结果分布 + 风险类别分布
+const OUTCOME_LABEL: Record<string, string> = {
+  autonomous: "自主完成",
+  refusal: "拒答",
+  no_doc: "无文档兜底",
+  no_retrieval: "空检索"
+};
+
+const SafetySnapshot = ({
+                         performance,
+                         windowLabel
+                       }: {
+  performance: DashboardPerformance | null;
+  windowLabel: string;
+}) => {
+  const outcomes: DashboardNameCount[] = performance?.outcomeDistribution ?? [];
+  const risks: DashboardNameCount[] = performance?.riskCategories ?? [];
+
+  return (
+      <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50 p-3.5">
+        <div className="mb-3 flex items-center justify-between">
+          <p className="text-xs font-medium text-slate-600">安全面板（垂类）</p>
+          <span className="text-[11px] text-slate-400">{windowLabel}</span>
+        </div>
+        {outcomes.length === 0 ? (
+            <p className="py-1 text-[11px] text-slate-400">窗口内暂无对话数据</p>
+        ) : (
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {outcomes.map((item) => (
+                  <span
+                      key={item.name}
+                      className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-600"
+                  >
+                  {OUTCOME_LABEL[item.name] ?? item.name} · {item.count}
+                </span>
+              ))}
+            </div>
+        )}
+        {risks.length === 0 ? (
+            <p className="text-[11px] text-slate-400">风险类别：窗口内未命中</p>
+        ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {risks.map((item) => (
+                  <span
+                      key={item.name}
+                      className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-600"
+                  >
+                  {item.name} · {item.count}
+                </span>
+              ))}
+            </div>
+        )}
+      </div>
+  );
+};
+
 const EfficiencySnapshot = ({
                               overview,
                               windowLabel
@@ -1184,9 +1260,52 @@ const AIPerformanceCard = ({
               value={formatDuration(performance?.p95LatencyMs)}
               status={p95LatencyStatus}
           />
+          <MetricRow
+              icon={Zap}
+              label="首包 TTFT P95"
+              value={formatDuration(performance?.p95TtftMs)}
+              status={getTtftStatus(performance?.p95TtftMs)}
+          />
+          <MetricRow
+              icon={Activity}
+              label="生成速度"
+              value={performance?.avgTps == null ? "-" : `${performance.avgTps} tok/s`}
+              status={getTpsStatus(performance?.avgTps)}
+          />
+          <MetricRow
+              icon={Timer}
+              label="自主完成率"
+              value={formatPercent(performance?.autonomyRate)}
+              status={(performance?.autonomyRate ?? 0) >= 80 ? "good" : (performance?.autonomyRate ?? 0) >= 60 ? "warning" : "bad"}
+          />
+          <MetricRow
+              icon={ShieldCheck}
+              label="拒答率"
+              value={formatPercent(performance?.refusalRate)}
+              status="warning"
+          />
+          <MetricRow
+              icon={Gauge}
+              label="链路可用率"
+              value={formatPercent(performance?.toolCallSuccessRate)}
+              status={(performance?.toolCallSuccessRate ?? 0) >= 99 ? "good" : (performance?.toolCallSuccessRate ?? 0) >= 95 ? "warning" : "bad"}
+          />
+          <MetricRow
+              icon={ThumbsUp}
+              label="好评率"
+              value={formatPercent(performance?.likeRate)}
+              status={(performance?.likeRate ?? 0) >= 80 ? "good" : (performance?.likeRate ?? 0) >= 50 ? "warning" : "bad"}
+          />
+          <MetricRow
+              icon={BarChart3}
+              label="Token 用量（输出）"
+              value={performance?.outputTokens == null ? "-" : `${performance.outputTokens}`}
+              status="good"
+          />
         </div>
 
         <QualitySnapshot performance={performance} windowLabel={timeWindowLabel} />
+        <SafetySnapshot performance={performance} windowLabel={timeWindowLabel} />
         <EfficiencySnapshot overview={overview} windowLabel={timeWindowLabel} />
       </DashCard>
   );

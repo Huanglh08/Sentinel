@@ -23,7 +23,7 @@ foreach ($n in $nodes) {
     } | ConvertTo-Json -Depth 5
 
     try {
-        $r = Invoke-RestMethod -Uri "http://localhost:9090/api/ragent/intent-tree" -Method Post -ContentType "application/json" -Body $body -Headers @{Authorization = $token}
+        $r = Invoke-RestMethod -Uri "http://localhost:9090/api/sentinel/intent-tree" -Method Post -ContentType "application/json" -Body $body -Headers @{Authorization = $token}
         Write-Host "  $($n.intentCode) success=$($r.success) data=$($r.data) message=$($r.message)"
     } catch {
         Write-Host "  $($n.intentCode) ERROR: $($_.Exception.Message)"

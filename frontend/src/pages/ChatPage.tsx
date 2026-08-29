@@ -82,7 +82,7 @@ export function ChatPage() {
   return (
     <MainLayout>
       <div className="flex h-full">
-        <div className="flex h-full min-w-0 flex-1 flex-col bg-white">
+        <div className="flex h-full min-w-0 flex-1 flex-col">
           <div className="flex-1 min-h-0">
             <MessageList
               messages={messages}
@@ -92,7 +92,9 @@ export function ChatPage() {
             />
           </div>
           {showWelcome ? null : (
-            <div className="relative z-20 bg-white">
+            // 保持透明：MainLayout 的背景图已铺满整个视口高度，此处若加白底
+            // 会在底部截出一块白色，与上方聊天区、欢迎页观感割裂
+            <div className="relative z-20">
               <div className="mx-auto max-w-[840px] px-6 pt-1 pb-4">
                 <ChatInput />
               </div>

@@ -1,4 +1,4 @@
--- PostgreSQL Schema for Ragent
+-- PostgreSQL Schema for Sentinel
 -- Converted from MySQL schema_table.sql
 
 -- Enable pgvector extension
@@ -349,7 +349,7 @@ CREATE TABLE t_rag_trace_run (
     trace_name      VARCHAR(128),
     entry_method    VARCHAR(256),
     conversation_id VARCHAR(20),
-    task_id         VARCHAR(20),
+    task_id         VARCHAR(64),
     user_id         VARCHAR(20),
     status          VARCHAR(16)      NOT NULL DEFAULT 'RUNNING',
     error_message   VARCHAR(1000),
@@ -368,9 +368,9 @@ COMMENT ON TABLE t_rag_trace_run IS 'Trace 运行记录表';
 
 CREATE TABLE t_rag_trace_node (
     id             VARCHAR(20)           NOT NULL PRIMARY KEY,
-    trace_id       VARCHAR(20)      NOT NULL,
-    node_id        VARCHAR(20)      NOT NULL,
-    parent_node_id VARCHAR(20),
+    trace_id       VARCHAR(64)      NOT NULL,
+    node_id        VARCHAR(64)      NOT NULL,
+    parent_node_id VARCHAR(64),
     depth          INTEGER          DEFAULT 0,
     node_type      VARCHAR(16),
     node_name      VARCHAR(128),

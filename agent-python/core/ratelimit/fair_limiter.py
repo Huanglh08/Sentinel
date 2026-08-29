@@ -71,7 +71,8 @@ class FairDistributedRateLimiter:
                  max_permits: int = 16, lease_seconds: int = 120,
                  poll_interval_ms: int = 200) -> None:
         self.name = name
-        self.redis_url = redis_url or os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0")
+        # 与 Java application.yaml 的 spring.data.redis 密码对齐
+        self.redis_url = redis_url or os.getenv("REDIS_URL", "redis://:123456@127.0.0.1:6379/0")
         self.max_permits = max_permits
         self.lease_seconds = lease_seconds
         self.poll_interval_ms = max(poll_interval_ms, 50)
@@ -81,6 +82,7 @@ class FairDistributedRateLimiter:
         self._listener_task = None
         self._pollers: dict[str, asyncio.Task] = {}
         self._started = False
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     # ---- Redis 懒加载 ----
     @property
@@ -113,6 +115,7 @@ class FairDistributedRateLimiter:
     async def start(self) -> None:
         if self._started:
             return
+        self._loop = asyncio.get_running_loop()
         await self.redis.set(self._sem_key(), self.max_permits, nx=True)
         self._lua = self.redis.register_script(_CLAIM_LUA)
         self._pubsub = self.redis.pubsub()
@@ -150,9 +153,18 @@ class FairDistributedRateLimiter:
         if req.cancel_binder is not None:
             req.cancel_binder(ticket.cancel)
         # entry 存活标记必须先于入队写入
-        asyncio.create_task(self._set_entry(ticket.request_id, req.max_wait_millis))
-        asyncio.create_task(self._enqueue(ticket))
+        self._dispatch(self._set_entry(ticket.request_id, req.max_wait_millis))
+        self._dispatch(self._enqueue(ticket))
         return ticket
+
+    def _dispatch(self, coro) -> None:
+        # Java 版是纯同步 Redisson；Python 版底层是 asyncio redis，
+        # acquire 可能从工作线程（run_in_executor）调用，必须线程安全地投递
+        loop = self._loop
+        if loop is not None and loop.is_running():
+            asyncio.run_coroutine_threadsafe(coro, loop)
+        else:
+            asyncio.create_task(coro)
 
     async def _set_entry(self, request_id: str, max_wait_ms: int) -> None:
         ttl = max(int(max_wait_ms), 1) + _ENTRY_TTL_BUFFER_MS

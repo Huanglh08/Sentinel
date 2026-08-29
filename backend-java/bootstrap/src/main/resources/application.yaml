@@ -1,11 +1,11 @@
 server:
   port: 9090
   servlet:
-    context-path: /api/ragent
+    context-path: /api/sentinel
 
 spring:
   application:
-    name: ragent${unique-name:}-service
+    name: sentinel${unique-name:}-service
 
   servlet:
     multipart:
@@ -17,14 +17,14 @@ spring:
     type: com.zaxxer.hikari.HikariDataSource
     username: postgres
     password: postgres
-    url: jdbc:postgresql://127.0.0.1:5432/ragent?client_encoding=UTF8
+    url: jdbc:postgresql://127.0.0.1:5432/sentinel?client_encoding=UTF8
     hikari:
       connection-timeout: 5000
       idle-timeout: 600000
       max-lifetime: 1800000
       maximum-pool-size: 10
       minimum-idle: 5
-      pool-name: RagentHikariPool
+      pool-name: SentinelHikariPool
 
   data:
     redis:
@@ -35,10 +35,10 @@ spring:
 rocketmq:
   name-server: 127.0.0.1:9876
   producer:
-    group: ragent-producer${unique-name:}_pg
+    group: sentinel-producer${unique-name:}_pg
     send-message-timeout: 2000
 
-ragent:
+sentinel:
   engine:
     type: workflow  # 执行架构档位，可选 workflow（v1 编排管线）/ agent（v2 ReAct 架构，RAG 管线降级为主 Agent 的一个 Tool）
   demo-mode: false
@@ -47,13 +47,13 @@ ragent:
 
 rag:
   python:
-    base-url: ${RAGENT_PYTHON_BASE_URL:http://localhost:8001}  # g2 分层：Python agent 服务地址
+    base-url: ${SENTINEL_PYTHON_BASE_URL:http://localhost:8001}  # g2 分层：Python agent 服务地址
   eval:
-    enabled: true  # 开启评测专用接口 /api/ragent/rag/eval（生产应改回 false）
+    enabled: true  # 开启评测专用接口 /api/sentinel/rag/eval（生产应改回 false）
   storage:
     type: s3  # 可选 s3（rustfs / minio）/ oss（阿里云）
-    kb-bucket: ragent-sources        # 全局知识库桶（私有），所有知识库文档按 collectionName 目录隔离；OSS 桶名全局唯一，生产需按部署覆盖
-    asset-bucket: ragent-assets # 多模态资产桶（公共读），PDF 抽出的图片等供浏览器匿名直连预览
+    kb-bucket: sentinel-sources        # 全局知识库桶（私有），所有知识库文档按 collectionName 目录隔离；OSS 桶名全局唯一，生产需按部署覆盖
+    asset-bucket: sentinel-assets # 多模态资产桶（公共读），PDF 抽出的图片等供浏览器匿名直连预览
     s3:
       endpoint: http://localhost:9000
       access-key: rustfsadmin
@@ -66,7 +66,7 @@ rag:
       access-key: ${OSS_ACCESS_KEY:}
       secret-key: ${OSS_SECRET_KEY:}
       region: cn-hangzhou
-      public-url:  # 虚拟主机式基址（含 bucket 子域），如 https://ragent-assets.oss-cn-hangzhou.aliyuncs.com；留空由 endpoint 推导
+      public-url:  # 虚拟主机式基址（含 bucket 子域），如 https://sentinel-assets.oss-cn-hangzhou.aliyuncs.com；留空由 endpoint 推导
 
   vector:
     type: pg  # 可选 milvus / pg
@@ -146,7 +146,7 @@ rag:
       confidence-threshold: 0.6    # KB 意图最高分低于此值 → 退化为全库检索
       supplement-ratio: 0.25       # 定向时各通道从自身产出额度划给「未命中库」的保底比例，兜住意图判错；0=关闭补充路，命中库已覆盖全库时自动不补
     channels:
-      timeout-ms: 15000     # 单通道查询超时上限（毫秒）
+      timeout-ms: 45000     # 单通道查询超时上限（毫秒）；远程 embedding API 首次调用常见 10~20s，15s 会误杀导致检索空结果
       vector:
         enabled: true       # 向量通道总开关
       keyword:

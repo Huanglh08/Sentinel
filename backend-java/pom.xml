@@ -3,13 +3,13 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.nageoffer.ai</groupId>
-    <artifactId>ragent</artifactId>
+    <artifactId>sentinel</artifactId>
     <version>0.0.1-SNAPSHOT</version>
 
-    <name>ragent-ai</name>
+    <name>sentinel-ai</name>
     <packaging>pom</packaging>
     <description>
-        RAG综合智能体 - 基于Spring Boot的智能文档处理与检索系统，集成向量数据库，拥有智能问答、知识库、会话记忆、深度思考等功能
+        RAG缁煎悎鏅鸿兘浣?- 鍩轰簬Spring Boot鐨勬櫤鑳芥枃妗ｅ�勭悊涓庢��绱㈢郴缁燂紝闆嗘垚鍚戦噺鏁版嵁搴擄紝鎷ユ湁鏅鸿兘闂�绛斻�佺煡璇嗗簱銆佷細璇濊�板繂銆佹繁搴︽�濊�冪瓑鍔熻兘
     </description>
 
     <properties>
@@ -33,8 +33,8 @@
         <bizlog-sdk.version>3.0.6</bizlog-sdk.version>
         <javax-validation-api.version>2.0.1.Final</javax-validation-api.version>
         <spotless-maven-plugin.version>2.22.1</spotless-maven-plugin.version>
-        <!-- surefire 配置中的 @{argLine} 需要该属性存在（通常由 jacoco 定义）；
-             未接入 jacoco 时给出空默认值，避免 fork 出的测试 JVM 收到字面量 @{argLine} 直接崩溃 -->
+        <!-- surefire 閰嶇疆涓�鐨� @{argLine} 闇�瑕佽�ュ睘鎬у瓨鍦�锛堥�氬父鐢?jacoco 瀹氫箟锛夛紱
+             鏈�鎺ュ�?jacoco 鏃剁粰鍑虹┖榛樿�ゅ�硷紝閬垮厤 fork 鍑虹殑娴嬭瘯 JVM 鏀跺埌瀛楅潰閲?@{argLine} 鐩存帴宕╂簝 -->
         <argLine/>
     </properties>
 
@@ -267,7 +267,7 @@
                 <configuration>
                     <java>
                         <licenseHeader>
-                            <!-- ${maven.multiModuleProjectDirectory} 爆红属于正常，并不影响编译或者运行，忽略就好 -->
+                            <!-- ${maven.multiModuleProjectDirectory} 鐖嗙孩灞炰簬姝ｅ父锛屽苟涓嶅奖鍝嶇紪璇戞垨鑰呰繍琛岋紝蹇界暐灏卞ソ -->
                             <file>${maven.multiModuleProjectDirectory}/resources/format/copyright.txt</file>
                         </licenseHeader>
                     </java>

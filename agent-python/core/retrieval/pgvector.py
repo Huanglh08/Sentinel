@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 from typing import Any
 
 from core.embedding import EmbeddingConfig, RoutingEmbeddingService
@@ -46,12 +45,10 @@ class PgVectorBackend(VectorBackend):
             raise ValueError("PgVectorBackend 必须传入 routing（RoutingEmbeddingService）")
         self.routing = routing
         self.config = config or EmbeddingConfig()
-        # DSN 默认对齐 ragent application.yaml datasource：
-        # postgresql://127.0.0.1:5432/ragent?user=postgres&password=postgres
-        self.dsn = dsn or os.getenv(
-            "PG_DSN",
-            "postgresql://postgres:postgres@127.0.0.1:5432/ragent?client_encoding=UTF8",
-        )
+        # DSN 统一走 core.db（与 Java application.yaml datasource 对齐：sentinel 库）
+        from core.db import get_dsn
+
+        self.dsn = dsn or get_dsn()
         self.table = table
         self._pool = None  # 延迟创建，避免无 pg 依赖时启动崩溃
 

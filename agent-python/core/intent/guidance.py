@@ -242,9 +242,11 @@ class IntentGuidanceService:
         """解析选项显示文本。"""
         if node is None:
             return ""
-        if node.full_path:
-            return node.full_path
-        return node.name or node.id
+        # IntentNode 数据类无 full_path 字段（历史上误引用导致 AttributeError 使 SSE 流中断）
+        full_path = getattr(node, "full_path", None)
+        if full_path:
+            return str(full_path)
+        return node.description or node.name or node.id
 
     def _build_system_aliases(self, system_name: str) -> list[str]:
         """构建系统别名列表。"""

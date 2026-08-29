@@ -35,8 +35,13 @@ export function LoginPage() {
 
   return (
     <div className="relative flex min-h-screen items-center justify-center px-4">
-      <div className="absolute inset-0 bg-gradient-to-br from-slate-50 via-blue-50/50 to-blue-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-900" />
-      <div className="relative z-10 w-full max-w-md rounded-3xl border border-border/70 bg-background/80 p-8 shadow-soft backdrop-blur">
+      <div
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+        style={{ backgroundImage: "url(/backgrounds/bg-1-grid.png)" }}
+        aria-hidden="true"
+      />
+      <div className="absolute inset-0 bg-slate-950/30" aria-hidden="true" />
+      <div className="relative z-10 w-full max-w-md rounded-3xl border border-white/50 bg-white/85 p-8 shadow-soft backdrop-blur-xl">
         <div className="mb-6">
           <p className="font-display text-2xl font-semibold">欢迎回来</p>
           <p className="mt-1 text-sm text-muted-foreground">

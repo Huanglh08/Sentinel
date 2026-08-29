@@ -1,0 +1,340 @@
+"""基于 Java 端 EvalController 的检索质量评测（v3 离线指标：Recall@5 / HitRate@5 / MRR）。
+
+读取 seed-retrieval.jsonl,对每条 q 调用
+    GET http://localhost:9090/api/sentinel/rag/eval?question=<q>
+拿到检索文档业务码列表(retrievedDocIds,与 expected_doc_ids 同为 doc_name 剥后缀),统计:
+
+- Recall@5: |top5 ∩ expected| / |expected| 的宏平均
+- HitRate@5: top5 至少命中一个 expected 的比例
+- MRR: expected 中第一个命中文档排名倒数的平均
+- 检索延迟 P50 / P90 / P95
+
+输出 JSON + Markdown 报告。
+
+运行:
+    python -m eval.retrieval_eval
+或:
+    python -m eval.retrieval_eval --eval-url http://localhost:9090/api/sentinel/rag/eval \
+        --seed eval/data/seed-retrieval.jsonl --output eval/reports
+"""
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import statistics
+import sys
+import time
+import urllib.parse
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+
+import httpx
+
+
+# ---------- 鉴权 ----------
+
+
+async def login(client: httpx.AsyncClient, api_base: str, username: str, password: str) -> str:
+    """登录 Java 网关获取 token(裸 token,不带 Bearer 前缀)。"""
+    resp = await client.post(
+        f"{api_base.rstrip('/')}/api/sentinel/auth/login",
+        json={"username": username, "password": password},
+        timeout=15.0,
+    )
+    resp.raise_for_status()
+    payload = resp.json()
+    # 响应结构:{"code": "0", "message": null, "data": {"token": "...", ...}}
+    if str(payload.get("code")) != "0":
+        raise RuntimeError(f"登录失败:code={payload.get('code')}, message={payload.get('message')}")
+    token = (payload.get("data") or {}).get("token")
+    if not token:
+        raise RuntimeError(f"登录响应中无 token:{payload}")
+    return token
+
+
+# ---------- 数据模型 ----------
+
+
+@dataclass
+class RetrievalSeedCase:
+    q: str
+    expected_doc_ids: list[str] = field(default_factory=list)
+    category: str = "general"
+
+
+@dataclass
+class RetrievalCaseResult:
+    question: str
+    category: str
+    expected_doc_ids: list[str]
+    retrieved_doc_ids: list[str]
+    top5_doc_ids: list[str]
+    recall_at_5: float
+    hit_at_5: bool
+    reciprocal_rank: float
+    latency_ms: float
+    error: str | None = None
+
+
+@dataclass
+class RetrievalEvalSummary:
+    total: int
+    successful: int
+    failed: int
+    recall_at_5: float
+    hit_rate_at_5: float
+    mrr: float
+    latency_p50: float
+    latency_p90: float
+    latency_p95: float
+    latency_avg: float
+    cases: list[RetrievalCaseResult]
+
+
+# ---------- IO ----------
+
+
+def load_seeds(path: Path) -> list[RetrievalSeedCase]:
+    if not path.exists():
+        raise FileNotFoundError(f"seed 文件不存在:{path}")
+    out: list[RetrievalSeedCase] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        item = json.loads(line)
+        out.append(
+            RetrievalSeedCase(
+                q=str(item["q"]).strip(),
+                expected_doc_ids=[str(x) for x in item.get("expected_doc_ids", [])],
+                category=str(item.get("category", "general")),
+            )
+        )
+    if not out:
+        raise ValueError(f"seed 文件为空:{path}")
+    return out
+
+
+# ---------- 指标计算（确定性，无 LLM 依赖） ----------
+
+
+def _score_case(expected: list[str], retrieved: list[str], k: int = 5) -> tuple[float, bool, float]:
+    """返回 (recall@k, hit@k, reciprocal_rank)。"""
+    top_k = retrieved[:k]
+    expected_set = set(expected)
+    if not expected_set:
+        # 无标注时视为命中（不参与召回统计）
+        return 1.0, True, 1.0
+    hits = len(expected_set & set(top_k))
+    recall = hits / len(expected_set)
+    hit = hits > 0
+    rr = 0.0
+    for idx, doc in enumerate(top_k, 1):
+        if doc in expected_set:
+            rr = 1.0 / idx
+            break
+    return recall, hit, rr
+
+
+# ---------- 单条评测 ----------
+
+
+async def _eval_one(
+    client: httpx.AsyncClient,
+    base_url: str,
+    case: RetrievalSeedCase,
+    timeout: float,
+) -> RetrievalCaseResult:
+    url = f"{base_url.rstrip('/')}?question={urllib.parse.quote(case.q)}"
+    t0 = time.perf_counter()
+    try:
+        resp = await client.get(url, timeout=timeout)
+        latency = (time.perf_counter() - t0) * 1000.0
+        if resp.status_code != 200:
+            return RetrievalCaseResult(
+                question=case.q,
+                category=case.category,
+                expected_doc_ids=case.expected_doc_ids,
+                retrieved_doc_ids=[],
+                top5_doc_ids=[],
+                recall_at_5=0.0,
+                hit_at_5=False,
+                reciprocal_rank=0.0,
+                latency_ms=round(latency, 2),
+                error=f"HTTP {resp.status_code}: {resp.text[:200]}",
+            )
+        data = resp.json()
+    except Exception as e:
+        latency = (time.perf_counter() - t0) * 1000.0
+        return RetrievalCaseResult(
+            question=case.q,
+            category=case.category,
+            expected_doc_ids=case.expected_doc_ids,
+            retrieved_doc_ids=[],
+            top5_doc_ids=[],
+            recall_at_5=0.0,
+            hit_at_5=False,
+            reciprocal_rank=0.0,
+            latency_ms=round(latency, 2),
+            error=f"exception: {e!s}",
+        )
+
+    # Result 包装校验:{"code": "0", "message": ..., "data": {...}}
+    biz_code = data.get("code")
+    if biz_code is not None and str(biz_code) != "0":
+        return RetrievalCaseResult(
+            question=case.q,
+            category=case.category,
+            expected_doc_ids=case.expected_doc_ids,
+            retrieved_doc_ids=[],
+            top5_doc_ids=[],
+            recall_at_5=0.0,
+            hit_at_5=False,
+            reciprocal_rank=0.0,
+            latency_ms=round(latency, 2),
+            error=f"业务错误 code={biz_code}: {data.get('message')}",
+        )
+    body = data.get("data") if isinstance(data.get("data"), dict) else data
+    # 兼容字段(后端用 camelCase)
+    retrieved = body.get("retrievedDocIds") or body.get("retrieved_doc_ids") or []
+
+    recall, hit, rr = _score_case(case.expected_doc_ids, list(retrieved), k=5)
+    return RetrievalCaseResult(
+        question=case.q,
+        category=case.category,
+        expected_doc_ids=case.expected_doc_ids,
+        retrieved_doc_ids=list(retrieved),
+        top5_doc_ids=list(retrieved[:5]),
+        recall_at_5=round(recall, 4),
+        hit_at_5=hit,
+        reciprocal_rank=round(rr, 4),
+        latency_ms=round(latency, 2),
+        error=None,
+    )
+
+
+# ---------- 主流程 ----------
+
+
+async def _run(
+    base_url: str,
+    seeds: list[RetrievalSeedCase],
+    concurrency: int,
+    timeout: float,
+    username: str,
+    password: str,
+) -> RetrievalEvalSummary:
+    sem = asyncio.Semaphore(concurrency)
+    results: list[RetrievalCaseResult] = []
+
+    # 从 eval-url 提取 origin 作为登录 base
+    parsed = urllib.parse.urlsplit(base_url)
+    api_base = f"{parsed.scheme}://{parsed.netloc}"
+
+    async with httpx.AsyncClient() as client:
+        token = await login(client, api_base, username, password)
+        print(f"[retrieval_eval] 登录成功,token={token[:8]}***", file=sys.stderr)
+        client.headers["Authorization"] = token
+
+        async def _one(c: RetrievalSeedCase) -> RetrievalCaseResult:
+            async with sem:
+                return await _eval_one(client, base_url, c, timeout)
+
+        tasks = [asyncio.create_task(_one(c)) for c in seeds]
+        for i, coro in enumerate(asyncio.as_completed(tasks), 1):
+            r = await coro
+            results.append(r)
+            print(
+                f"[retrieval_eval] {i}/{len(seeds)} hit5={'✓' if r.hit_at_5 else '✗'} "
+                f"recall5={r.recall_at_5:.2f} rr={r.reciprocal_rank:.2f} lat={r.latency_ms:.0f}ms "
+                f"q='{r.question[:30]}'",
+                file=sys.stderr,
+            )
+
+    successful = [r for r in results if r.error is None]
+    failed = [r for r in results if r.error is not None]
+    latencies = sorted([r.latency_ms for r in successful])
+
+    def _pct(p: float) -> float:
+        if not latencies:
+            return 0.0
+        idx = max(0, min(len(latencies) - 1, int(round((p / 100.0) * (len(latencies) - 1)))))
+        return round(latencies[idx], 2)
+
+    return RetrievalEvalSummary(
+        total=len(results),
+        successful=len(successful),
+        failed=len(failed),
+        recall_at_5=round(statistics.mean([r.recall_at_5 for r in successful]), 4) if successful else 0.0,
+        hit_rate_at_5=round(sum(1 for r in successful if r.hit_at_5) / len(successful), 4) if successful else 0.0,
+        mrr=round(statistics.mean([r.reciprocal_rank for r in successful]), 4) if successful else 0.0,
+        latency_p50=_pct(50),
+        latency_p90=_pct(90),
+        latency_p95=_pct(95),
+        latency_avg=round(statistics.mean(latencies), 2) if latencies else 0.0,
+        cases=results,
+    )
+
+
+def main() -> int:
+    repo_root = Path(__file__).resolve().parents[2]
+    default_seed = repo_root / "evaluation" / "seeds" / "retrieval-seeds.jsonl"
+    default_output = repo_root / "evaluation" / "reports"
+
+    parser = argparse.ArgumentParser(description="基于 Java EvalController 的检索质量评测")
+    parser.add_argument(
+        "--eval-url",
+        default="http://localhost:9090/api/sentinel/rag/eval",
+        help="Java 端 EvalController 的 URL",
+    )
+    parser.add_argument("--seed", default=str(default_seed), help="seed jsonl 路径")
+    parser.add_argument("--output", default=str(default_output), help="报告输出目录")
+    parser.add_argument("--concurrency", type=int, default=4, help="并发请求数")
+    parser.add_argument("--timeout", type=float, default=120.0, help="单条超时秒数")
+    parser.add_argument("--name", default="retrieval", help="报告名前缀")
+    parser.add_argument("--username", default="admin", help="网关登录用户名")
+    parser.add_argument("--password", default="admin", help="网关登录密码")
+    args = parser.parse_args()
+
+    seeds = load_seeds(Path(args.seed))
+    print(f"[retrieval_eval] 加载 {len(seeds)} 条 seed from {args.seed}", file=sys.stderr)
+
+    summary = asyncio.run(_run(args.eval_url, seeds, args.concurrency, args.timeout, args.username, args.password))
+
+    output_dir = Path(args.output)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    json_path = output_dir / f"{args.name}-{timestamp}.json"
+    json_path.write_text(
+        json.dumps(
+            {
+                "summary": {k: v for k, v in asdict(summary).items() if k != "cases"},
+                "cases": [asdict(c) for c in summary.cases],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    print(f"[retrieval_eval] JSON 报告:{json_path}", file=sys.stderr)
+
+    from eval.report_renderer import render_retrieval_report
+
+    md_path = output_dir / f"{args.name}-{timestamp}.md"
+    md_path.write_text(
+        render_retrieval_report(summary, eval_url=args.eval_url, seed_path=str(args.seed)),
+        encoding="utf-8",
+    )
+    print(f"[retrieval_eval] Markdown 报告:{md_path}", file=sys.stderr)
+
+    if summary.recall_at_5 < 0.85 and summary.successful > 0:
+        print(
+            f"[retrieval_eval] 警告:Recall@5 {summary.recall_at_5:.2%} 低于 85% 目标",
+            file=sys.stderr,
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
