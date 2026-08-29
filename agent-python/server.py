@@ -11,16 +11,19 @@ import uuid
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, AsyncIterator
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from core.agent import Agent
 from core.case import CaseInvestigationAgent
+from core.case.notify import notify_approval_decided
+from core.case.types import AUDIT_OPERATION_APPROVE, AUDIT_OPERATION_REJECT
 from core.chunk.chunker import chunk_file
 from core.config import AppSettings, RAGConfigProperties, SearchChannelProperties
 from core.embedding import EmbeddingConfig, ModelHealthStore as EmbeddingHealthStore, ModelRoutingExecutor as EmbeddingRoutingExecutor, RoutingEmbeddingService
@@ -681,6 +684,32 @@ async def me(user=Depends(get_current_user)):
 # ---------------------------------------------------------------------------
 # 案件调查（Phase 1）：/case/investigate SSE + 案件查询。纯增量，不影响 /chat。
 # ---------------------------------------------------------------------------
+_CASE_SENSITIVE_ROLES = ("ADMIN", "RISK")  # 审批/归档敏感操作的允许角色关键字
+
+
+def _case_operator(user) -> str:
+    """提取操作人标识（P3-2）：sub -> username -> id 兜底链。"""
+    op = (
+        getattr(user, "sub", None)
+        or getattr(user, "username", None)
+        or getattr(user, "id", None)
+    )
+    return str(op or "").strip()
+
+
+def _require_case_operator(user) -> str:
+    """裁决/归档前置校验（P3-2）：操作人必须可追溯；登录态携带角色时须命中 ADMIN/RISK。"""
+    op = _case_operator(user)
+    if not op:
+        raise HTTPException(status_code=403, detail="无法确定操作人身份，拒绝敏感操作")
+    roles = getattr(user, "roles", None) or []
+    if roles and not any(
+        any(k in str(r).upper() for k in _CASE_SENSITIVE_ROLES) for r in roles
+    ):
+        raise HTTPException(status_code=403, detail=f"角色 {roles} 无审批权限（需 ADMIN/RISK）")
+    return op
+
+
 def _get_case_agent(request: Request) -> CaseInvestigationAgent:
     """懒加载案件调查 Agent：复用主 Agent 的 llm/mcp 实例（共享路由与 MCP 降级底座）。"""
     case_agent = getattr(request.app.state, "case_agent", None)
@@ -746,25 +775,185 @@ async def approval_list(
 async def approval_decide(
     approval_id: str, payload: ApprovalDecideRequest, request: Request, user=Depends(get_current_user)
 ):
-    """审批裁决：APPROVED / REJECTED。重复裁决幂等返回当前状态。"""
+    """审批裁决：APPROVED / REJECTED。
+
+    - 重复裁决幂等返回当前状态（不重复落处置/审计/通知）
+    - 首次裁决（P3-1/P3-2/P3-4）：写审计日志；APPROVED 自动落处置动作记录；
+      推送 IM 裁决结果
+    """
     case_agent = _get_case_agent(request)
-    operator = getattr(user, "username", None) or getattr(user, "id", None) or "anonymous"
+    operator = _require_case_operator(user)
     result = case_agent.store.decide_approval(
-        approval_id, status=payload.decision, operator=str(operator), opinion=payload.opinion
+        approval_id, status=payload.decision, operator=operator, opinion=payload.opinion
     )
     if result is None:
         raise HTTPException(status_code=404, detail="approval not found")
+    first_time = bool(result.pop("first_time", False))
+    if first_time:
+        operation = (
+            AUDIT_OPERATION_APPROVE if payload.decision == "APPROVED" else AUDIT_OPERATION_REJECT
+        )
+        case_agent.store.record_audit(
+            case_id=result.get("case_id", ""),
+            approval_id=approval_id,
+            operation=operation,
+            target=approval_id,
+            operator=operator,
+            detail=f"{payload.decision} {result.get('action', '')}｜意见: {payload.opinion[:100]}",
+        )
+        if payload.decision == "APPROVED":
+            case_agent.store.create_actions(
+                result.get("case_id", ""),
+                result.get("case_no", ""),
+                approval_id,
+                [{"action": result.get("action", ""), "detail": result.get("reason", "")}],
+                operator=operator,
+            )
+        notify_approval_decided(result, payload.decision, operator, payload.opinion)
     return result
 
 
 @app.get("/case/{case_id}")
 async def case_detail(case_id: str, request: Request, user=Depends(get_current_user)):
-    """查询单个案件（含证据链全量）。"""
+    """查询单个案件（含证据链 + 审批待办 + 处置记录 + 审计日志）。"""
     case_agent = _get_case_agent(request)
     case = case_agent.store.get_case(case_id)
     if case is None:
         raise HTTPException(status_code=404, detail="case not found")
+    case["approvals"] = case_agent.store.list_approvals(case_id=case_id)
+    case["actions"] = case_agent.store.list_actions(case_id)
+    case["audits"] = case_agent.store.list_audit(case_id)
     return case
+
+
+@app.post("/case/{case_id}/close")
+async def case_close(case_id: str, request: Request, user=Depends(get_current_user)):
+    """归档关闭案件（P3-3）：REPORTED/INVESTIGATING -> CLOSED，重复关闭幂等。"""
+    case_agent = _get_case_agent(request)
+    operator = _require_case_operator(user)
+    result = case_agent.store.close_case(case_id, operator=operator)
+    if result is None:
+        raise HTTPException(status_code=404, detail="case not found")
+    return result
+
+
+@app.get("/case/{case_id}/audit")
+async def case_audit(case_id: str, request: Request, user=Depends(get_current_user), limit: int = 100):
+    """案件审计日志（P3-2）：裁决/归档全量留痕查询。"""
+    case_agent = _get_case_agent(request)
+    if case_agent.store.get_case(case_id) is None:
+        raise HTTPException(status_code=404, detail="case not found")
+    return {"audits": case_agent.store.list_audit(case_id, limit=min(max(limit, 1), 200))}
+
+
+def _jsonish(value) -> dict:
+    """report/triage 字段兼容：DB 里可能是 JSON 字符串或已是 dict。"""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:  # noqa: BLE001
+            return {}
+    return {}
+
+
+def _render_case_report_md(case: dict, store) -> str:
+    """把案件完整数据渲染为 Markdown 调查报告（P3-3 导出）。"""
+    triage = _jsonish(case.get("triage"))
+    report = _jsonish(case.get("report"))
+    lines: list[str] = [
+        f"# 案件调查报告 · {case.get('case_no', case.get('id', ''))}",
+        "",
+        f"- **标题**: {case.get('title', '')}",
+        f"- **状态**: {case.get('status', '')}｜**优先级**: {case.get('priority', '')}"
+        f"｜**置信度**: {case.get('confidence', '')}",
+        f"- **调查对象**: {case.get('subject_type', '')} `{case.get('subject_id', '')}`",
+        f"- **创建时间**: {case.get('create_time', '')}"
+        f"｜**TTA**: {case.get('tta_ms', '-')}ms｜**TTR**: {case.get('ttr_ms', '-')}ms",
+        "",
+        "## 1. 线索摘要",
+        "",
+        str(case.get("clue_summary") or case.get("raw_input") or "-"),
+        "",
+        "## 2. 分诊结论",
+        "",
+        "```json",
+        json.dumps(triage, ensure_ascii=False, indent=2),
+        "```",
+        "",
+        "## 3. 调查结论",
+        "",
+    ]
+    if report:
+        for key in ("summary", "conclusion", "risk_level", "confidence"):
+            if report.get(key) is not None:
+                lines.append(f"- **{key}**: {report.get(key)}")
+        findings = report.get("key_findings") or []
+        if findings:
+            lines += ["", "### 关键发现", ""]
+            lines += [f"{i}. {f}" for i, f in enumerate(findings, 1)]
+        recs = report.get("recommendations") or []
+        if recs:
+            lines += ["", "### 处置建议", ""]
+            for r in recs:
+                mark = "需人工审批" if isinstance(r, dict) and r.get("requires_human_approval") else "可自动执行"
+                action = r.get("action", "") if isinstance(r, dict) else str(r)
+                lines.append(f"- [{mark}] {action}")
+        for key, val in report.items():
+            if key not in ("summary", "conclusion", "risk_level", "confidence",
+                           "key_findings", "recommendations", "raw") and val:
+                lines += ["", f"### {key}", "", "```json", json.dumps(val, ensure_ascii=False, indent=2), "```"]
+    else:
+        lines.append("（无结构化报告）")
+    lines += ["", "## 4. 证据链", "", "| # | 阶段 | 工具 | 思考 | 结果摘要 | 耗时(ms) |", "|---|------|------|------|----------|----------|"]
+    for ev in case.get("evidence", []):
+        obs = str(ev.get("observation", "")).replace("\n", " ")[:120]
+        thought = str(ev.get("thought", "")).replace("\n", " ").replace("|", "\\|")[:80]
+        lines.append(
+            f"| {ev.get('step_no', '')} | {ev.get('phase', '')} | {ev.get('tool_id', '')} "
+            f"| {thought} | {obs.replace('|', '\\|')} | {ev.get('elapsed_ms', '')} |"
+        )
+    lines += ["", "## 5. 审批与处置", "", "| 待办 | 动作 | 审批状态 | 操作人 | 意见 |", "|------|------|----------|--------|------|"]
+    for ap in case.get("approvals", []):
+        lines.append(
+            f"| {ap.get('id', '')[:8]} | {ap.get('action', '')} | {ap.get('status', '')} "
+            f"| {ap.get('operator', '') or '-'} | {str(ap.get('opinion', '') or '-').replace('|', '\\|')[:60]} |"
+        )
+    lines += ["", "| 处置动作 | 详情 | 状态 | 操作人 | 时间 |", "|----------|------|------|--------|------|"]
+    for ac in case.get("actions", []):
+        lines.append(
+            f"| {ac.get('action', '')} | {str(ac.get('detail', '')).replace('|', '\\|')[:80]} "
+            f"| {ac.get('status', '')} | {ac.get('operator', '')} | {ac.get('create_time', '')} |"
+        )
+    lines += ["", "## 6. 审计日志", "", "| 操作 | 对象 | 操作人 | 详情 | 时间 |", "|------|------|--------|------|------|"]
+    for au in case.get("audits", []):
+        lines.append(
+            f"| {au.get('operation', '')} | {au.get('target', '')} | {au.get('operator', '')} "
+            f"| {str(au.get('detail', '')).replace('|', '\\|')[:80]} | {au.get('create_time', '')} |"
+        )
+    lines += ["", "---", f"*导出时间: {datetime.now().isoformat(timespec='seconds')}*"]
+    return "\n".join(lines)
+
+
+@app.get("/case/{case_id}/report/export")
+async def case_report_export(case_id: str, request: Request, user=Depends(get_current_user)):
+    """调查报告 Markdown 导出（P3-3）：下载附件。"""
+    case_agent = _get_case_agent(request)
+    case = case_agent.store.get_case(case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="case not found")
+    case["approvals"] = case_agent.store.list_approvals(case_id=case_id)
+    case["actions"] = case_agent.store.list_actions(case_id)
+    case["audits"] = case_agent.store.list_audit(case_id)
+    md = _render_case_report_md(case, case_agent.store)
+    case_no = str(case.get("case_no") or case_id)
+    return Response(
+        content=md,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{case_no}-report.md"'},
+    )
 
 
 @app.get("/cases")

@@ -41,6 +41,32 @@ export type CaseDetail = CaseListItem & {
   tta_ms?: number;
   ttr_ms?: number;
   evidence?: CaseEvidenceStep[];
+  approvals?: ApprovalItem[];
+  actions?: CaseActionItem[];
+  audits?: CaseAuditItem[];
+};
+
+export type CaseActionItem = {
+  id: string;
+  case_id: string;
+  case_no: string;
+  approval_id: string;
+  action: string;
+  detail: string;
+  status: string;
+  operator: string;
+  create_time: string;
+};
+
+export type CaseAuditItem = {
+  id: string;
+  case_id: string;
+  approval_id: string;
+  operation: string;
+  target: string;
+  operator: string;
+  detail: string;
+  create_time: string;
 };
 
 export type ApprovalItem = {
@@ -105,6 +131,33 @@ export async function decideApproval(
     `/case/approvals/${approvalId}/decide`,
     { decision, opinion }
   );
+}
+
+export async function closeCase(
+  caseId: string
+): Promise<{ case: CaseDetail; closed: boolean }> {
+  return api.post<{ case: CaseDetail; closed: boolean }, { case: CaseDetail; closed: boolean }>(
+    `/case/${caseId}/close`
+  );
+}
+
+// 导出调查报告 Markdown（带鉴权头，blob 触发下载）
+export async function exportCaseReport(caseId: string, caseNo: string): Promise<void> {
+  const resp = await fetch(`${API_BASE_URL}/case/${caseId}/report/export`, {
+    headers: { Authorization: storage.getToken() || "" }
+  });
+  if (!resp.ok) {
+    throw new Error(`报告导出失败: HTTP ${resp.status}`);
+  }
+  const blob = await resp.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${caseNo || caseId}-report.md`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 // ---------------------------------------------------------------------------

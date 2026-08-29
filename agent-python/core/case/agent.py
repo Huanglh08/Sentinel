@@ -27,6 +27,7 @@ from typing import AsyncIterator
 
 from core.case.skills import SkillLoader
 from core.case.store import CaseStore
+from core.case.notify import notify_approval_created
 from core.case.types import (
     PHASE_INVESTIGATE,
     PHASE_REPORT,
@@ -327,6 +328,7 @@ class CaseInvestigationAgent:
             ]
             if pending:
                 approvals = self.store.create_approvals(case_id, case["case_no"], pending)
+                notify_approval_created(approvals, case.get("case_no", ""))
                 yield {"type": "approval.created", "approvals": approvals}
 
             yield {

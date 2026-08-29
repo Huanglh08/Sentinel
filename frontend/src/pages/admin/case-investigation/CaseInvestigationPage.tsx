@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -36,17 +36,19 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import {
+  closeCase,
+  decideApproval,
+  exportCaseReport,
   getCaseDetail,
   listApprovals,
   listCases,
-  decideApproval,
   streamInvestigate,
   type ApprovalItem,
   type CaseDetail,
   type CaseListItem,
   type InvestigationSseEvent
 } from "@/services/caseService";
-import { CheckCircle2, Gavel, Loader2, Search, XCircle } from "lucide-react";
+import { Archive, CheckCircle2, FileDown, Gavel, Loader2, Search, XCircle } from "lucide-react";
 
 const STATUS_VARIANT: Record<string, string> = {
   OPEN: "bg-blue-100 text-blue-700",
@@ -89,6 +91,19 @@ export function CaseInvestigationPage() {
   const [detail, setDetail] = useState<CaseDetail | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
 
+  // 列表筛选（P3-5：状态 + 优先级，本地过滤）
+  const [filterStatus, setFilterStatus] = useState("ALL");
+  const [filterPriority, setFilterPriority] = useState("ALL");
+  const filteredCases = useMemo(
+    () =>
+      cases.filter(
+        (c) =>
+          (filterStatus === "ALL" || c.status === filterStatus) &&
+          (filterPriority === "ALL" || c.priority === filterPriority)
+      ),
+    [cases, filterStatus, filterPriority]
+  );
+
   // 审批操作
   const [decideTarget, setDecideTarget] = useState<ApprovalItem | null>(null);
   const [decideAction, setDecideAction] = useState<"APPROVED" | "REJECTED">("APPROVED");
@@ -130,6 +145,34 @@ export function CaseInvestigationPage() {
       void refreshApprovals();
     }
   }, [tab, refreshCases, refreshApprovals]);
+
+  // 归档案件（P3-3：REPORTED/INVESTIGATING -> CLOSED，幂等）
+  const handleArchive = async (c: CaseListItem) => {
+    try {
+      const res = await closeCase(c.id);
+      if (res.closed) {
+        toast.success(`案件已归档：${c.case_no}`);
+      } else {
+        toast.info(`案件已处于归档状态：${c.case_no}`);
+      }
+      void refreshCases();
+      if (detail?.id === c.id) {
+        setDetail(await getCaseDetail(c.id));
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "归档失败");
+    }
+  };
+
+  // 导出调查报告 Markdown（P3-3）
+  const handleExport = async (c: CaseDetail | CaseListItem) => {
+    try {
+      await exportCaseReport(c.id, c.case_no);
+      toast.success(`报告已导出：${c.case_no}-report.md`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "导出失败");
+    }
+  };
 
   const handleInvestigate = async () => {
     if (clue.trim().length < 5) {
@@ -263,7 +306,35 @@ export function CaseInvestigationPage() {
         </CardHeader>
         <CardContent>
           {tab === "cases" ? (
-            <Table>
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <select
+                  className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                  value={filterStatus}
+                  onChange={(e) => setFilterStatus(e.target.value)}
+                >
+                  <option value="ALL">全部状态</option>
+                  <option value="OPEN">OPEN</option>
+                  <option value="INVESTIGATING">INVESTIGATING</option>
+                  <option value="REPORTED">REPORTED</option>
+                  <option value="CLOSED">CLOSED</option>
+                </select>
+                <select
+                  className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                  value={filterPriority}
+                  onChange={(e) => setFilterPriority(e.target.value)}
+                >
+                  <option value="ALL">全部优先级</option>
+                  <option value="P0">P0</option>
+                  <option value="P1">P1</option>
+                  <option value="P2">P2</option>
+                  <option value="P3">P3</option>
+                </select>
+                <span className="text-xs text-muted-foreground">
+                  {filteredCases.length}/{cases.length} 条
+                </span>
+              </div>
+              <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>案件号</TableHead>
@@ -282,14 +353,14 @@ export function CaseInvestigationPage() {
                       <Loader2 className="mx-auto h-5 w-5 animate-spin" />
                     </TableCell>
                   </TableRow>
-                ) : cases.length === 0 ? (
+                ) : filteredCases.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
                       暂无案件，点击「发起调查」开始
                     </TableCell>
                   </TableRow>
                 ) : (
-                  cases.map((c) => (
+                  filteredCases.map((c) => (
                     <TableRow key={c.id} className="cursor-pointer" onClick={() => void openDetail(c)}>
                       <TableCell className="font-mono text-xs">{c.case_no}</TableCell>
                       <TableCell className="max-w-[280px] truncate">{c.title}</TableCell>
@@ -308,15 +379,36 @@ export function CaseInvestigationPage() {
                       </TableCell>
                       <TableCell className="text-xs">{c.create_time || "-"}</TableCell>
                       <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); void openDetail(c); }}>
-                          详情
-                        </Button>
+                        <div className="flex justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            title="导出 Markdown 报告"
+                            onClick={(e) => { e.stopPropagation(); void handleExport(c); }}
+                          >
+                            <FileDown className="h-4 w-4" />
+                          </Button>
+                          {c.status !== "CLOSED" && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              title="归档关闭"
+                              onClick={(e) => { e.stopPropagation(); void handleArchive(c); }}
+                            >
+                              <Archive className="h-4 w-4" />
+                            </Button>
+                          )}
+                          <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); void openDetail(c); }}>
+                            详情
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))
                 )}
               </TableBody>
-            </Table>
+              </Table>
+            </div>
           ) : (
             <Table>
               <TableHeader>
@@ -534,16 +626,63 @@ export function CaseInvestigationPage() {
               {!!detail.evidence?.length && (
                 <div>
                   <div className="mb-1 font-medium">证据链（{detail.evidence.length} 步）</div>
-                  <div className="space-y-1">
+                  {/* P3-5：时间线样式（左侧竖线 + 节点圆点） */}
+                  <div className="relative space-y-3 pl-5 before:absolute before:bottom-1 before:left-[7px] before:top-1 before:w-px before:bg-border">
                     {detail.evidence.map((s) => (
-                      <div key={s.step_no} className="rounded-md border p-2 text-xs">
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline" className="font-mono">step{s.step_no}</Badge>
-                          <span className="font-medium">{s.tool_id}</span>
-                          {s.is_error && <Badge variant="outline" className="bg-red-100 text-red-700">失败</Badge>}
-                          {s.elapsed_ms != null && <span className="text-muted-foreground">{s.elapsed_ms}ms</span>}
+                      <div key={s.step_no} className="relative text-xs">
+                        <span
+                          className={`absolute -left-[18px] top-1 h-2.5 w-2.5 rounded-full border-2 border-background ${
+                            s.is_error ? "bg-red-500" : "bg-primary"
+                          }`}
+                        />
+                        <div className="rounded-md border p-2">
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline" className="font-mono">step{s.step_no}</Badge>
+                            <span className="font-medium">{s.tool_id}</span>
+                            {s.is_error && <Badge variant="outline" className="bg-red-100 text-red-700">失败</Badge>}
+                            {s.elapsed_ms != null && <span className="text-muted-foreground">{s.elapsed_ms}ms</span>}
+                          </div>
+                          {s.thought && <div className="mt-1 text-muted-foreground">{s.thought}</div>}
                         </div>
-                        {s.thought && <div className="mt-1 text-muted-foreground">{s.thought}</div>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* P3-1：处置记录 */}
+              {!!detail.actions?.length && (
+                <div>
+                  <div className="mb-1 font-medium">处置记录（{detail.actions.length} 条）</div>
+                  <div className="space-y-1">
+                    {detail.actions.map((a) => (
+                      <div key={a.id} className="rounded-md border p-2 text-xs">
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="bg-emerald-100 text-emerald-700">{a.status}</Badge>
+                          <span className="font-medium">{a.action}</span>
+                          <span className="ml-auto text-muted-foreground">
+                            {a.operator} · {a.create_time}
+                          </span>
+                        </div>
+                        {a.detail && <div className="mt-1 text-muted-foreground">{a.detail}</div>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* P3-2：审计日志 */}
+              {!!detail.audits?.length && (
+                <div>
+                  <div className="mb-1 font-medium">审计日志（{detail.audits.length} 条）</div>
+                  <div className="space-y-1">
+                    {detail.audits.map((a) => (
+                      <div key={a.id} className="flex items-center gap-2 rounded-md border p-2 text-xs">
+                        <Badge variant="outline" className="font-mono">{a.operation}</Badge>
+                        <span className="text-muted-foreground">{a.detail}</span>
+                        <span className="ml-auto shrink-0 text-muted-foreground">
+                          {a.operator} · {a.create_time}
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -551,6 +690,23 @@ export function CaseInvestigationPage() {
               )}
             </div>
           )}
+          {/* P3-3：详情弹窗操作 */}
+          <DialogFooter>
+            {detail && (
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => void handleExport(detail)}>
+                  <FileDown className="mr-1 h-4 w-4" />
+                  导出报告
+                </Button>
+                {detail.status !== "CLOSED" && (
+                  <Button variant="outline" size="sm" onClick={() => void handleArchive(detail)}>
+                    <Archive className="mr-1 h-4 w-4" />
+                    归档
+                  </Button>
+                )}
+              </div>
+            )}
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

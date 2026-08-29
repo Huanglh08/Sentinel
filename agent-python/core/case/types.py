@@ -25,6 +25,14 @@ APPROVAL_STATUS_PENDING = "PENDING"
 APPROVAL_STATUS_APPROVED = "APPROVED"
 APPROVAL_STATUS_REJECTED = "REJECTED"
 
+# 处置动作状态（Phase 3：审批通过后自动落处置记录）
+ACTION_STATUS_EXECUTED = "EXECUTED"
+
+# 审计操作类型（Phase 3：裁决/归档全量留痕）
+AUDIT_OPERATION_APPROVE = "APPROVE"
+AUDIT_OPERATION_REJECT = "REJECT"
+AUDIT_OPERATION_CLOSE = "CLOSE"
+
 # 调查阶段
 PHASE_TRIAGE = "TRIAGE"
 PHASE_INVESTIGATE = "INVESTIGATE"
@@ -102,6 +110,41 @@ class ApprovalItem:
     opinion: str = ""
     create_time: str = ""
     update_time: str = ""
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class CaseAction:
+    """处置动作记录（Phase 3）：审批 APPROVED 后按建议自动落一条可追溯的处置记录。"""
+
+    id: str = ""
+    case_id: str = ""
+    case_no: str = ""
+    approval_id: str = ""
+    action: str = ""
+    detail: str = ""
+    status: str = ACTION_STATUS_EXECUTED
+    operator: str = ""
+    create_time: str = ""
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+@dataclass
+class CaseAudit:
+    """审计日志（Phase 3）：裁决/归档等敏感操作全量留痕。"""
+
+    id: str = ""
+    case_id: str = ""
+    approval_id: str = ""
+    operation: str = ""  # APPROVE / REJECT / CLOSE
+    target: str = ""  # 操作对象标识（approval_id / case_id）
+    operator: str = ""
+    detail: str = ""
+    create_time: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)

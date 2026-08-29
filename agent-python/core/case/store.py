@@ -13,7 +13,10 @@ import logging
 from datetime import datetime
 
 from core.case.types import (
+    ACTION_STATUS_EXECUTED,
     APPROVAL_STATUS_PENDING,
+    AUDIT_OPERATION_CLOSE,
+    CASE_STATUS_CLOSED,
     CASE_STATUS_INVESTIGATING,
     CASE_STATUS_REPORTED,
     EvidenceStep,
@@ -38,6 +41,8 @@ class CaseStore:
         self._mem_cases: dict[str, dict] = {}
         self._mem_evidence: dict[str, list[dict]] = {}
         self._mem_approvals: dict[str, dict] = {}
+        self._mem_actions: dict[str, dict] = {}
+        self._mem_audits: dict[str, dict] = {}
         try:
             get_pool()
         except Exception as e:  # noqa: BLE001
@@ -374,7 +379,12 @@ class CaseStore:
     def decide_approval(
         self, approval_id: str, *, status: str, operator: str = "", opinion: str = ""
     ) -> dict | None:
-        """审批裁决（APPROVED / REJECTED）。重复裁决直接拒绝，返回 None。"""
+        """审批裁决（APPROVED / REJECTED）。
+
+        返回 dict 额外携带 first_time 标记：
+        - True：本次为首次裁决（PENDING -> 目标状态），上层可触发处置/审计/通知
+        - False：重复裁决，幂等返回当前现状，上层应提示而非重复执行
+        """
         from core.case.types import APPROVAL_STATUS_APPROVED, APPROVAL_STATUS_REJECTED
 
         if status not in (APPROVAL_STATUS_APPROVED, APPROVAL_STATUS_REJECTED):
@@ -388,31 +398,220 @@ class CaseStore:
                         "update_time=%s WHERE id=%s AND status=%s",
                         (status, operator, opinion, now, approval_id, APPROVAL_STATUS_PENDING),
                     )
-                    if cur.rowcount == 0:
-                        cur.execute(
-                            "SELECT id, case_id, case_no, action, reason, status, operator, "
-                            "opinion, create_time, update_time FROM t_case_approval WHERE id=%s",
-                            (approval_id,),
-                        )
-                        row = cur.fetchone()
-                        if not row:
-                            return None
-                        cols = (
-                            "id", "case_id", "case_no", "action", "reason", "status",
-                            "operator", "opinion", "create_time", "update_time",
-                        )
-                        return dict(zip(cols, row))  # 已裁决过：原样返回供幂等提示
+                    first_time = cur.rowcount > 0
+                    cur.execute(
+                        "SELECT id, case_id, case_no, action, reason, status, operator, "
+                        "opinion, create_time, update_time FROM t_case_approval WHERE id=%s",
+                        (approval_id,),
+                    )
+                    row = cur.fetchone()
+                    if not row:
+                        return None
+                    cols = (
+                        "id", "case_id", "case_no", "action", "reason", "status",
+                        "operator", "opinion", "create_time", "update_time",
+                    )
+                    item = dict(zip(cols, row))
+                    item["first_time"] = first_time
+                    if first_time:
+                        item.pop("first_time")
+                        self._mem_approvals[approval_id] = dict(item)
+                        item["first_time"] = True
+                    return item
             except Exception:  # noqa: BLE001
                 logger.exception("[case] 审批裁决失败: %s", approval_id)
         rec = self._mem_approvals.get(approval_id)
         if rec is None:
             return None
         if rec.get("status") != APPROVAL_STATUS_PENDING:
-            return dict(rec)
+            item = dict(rec)
+            item["first_time"] = False
+            return item
         rec.update(
             status=status,
             operator=operator,
             opinion=opinion,
             update_time=now.isoformat(timespec="seconds"),
         )
+        item = dict(rec)
+        item["first_time"] = True
+        return item
+
+    # ------------------------------------------------------------------
+    # 处置动作 + 审计日志 + 归档（Phase 3）
+    # ------------------------------------------------------------------
+    def create_actions(
+        self,
+        case_id: str,
+        case_no: str,
+        approval_id: str,
+        items: list[dict],
+        operator: str = "",
+    ) -> list[dict]:
+        """审批 APPROVED 后按建议批量落处置动作记录（EXECUTED，可追溯）。"""
+        created: list[dict] = []
+        rows: list[tuple] = []
+        now = self._now()
+        for it in items:
+            aid = next_message_id()
+            rec = {
+                "id": aid,
+                "case_id": case_id,
+                "case_no": case_no,
+                "approval_id": approval_id,
+                "action": str(it.get("action", ""))[:255],
+                "detail": str(it.get("detail") or it.get("reason", ""))[:1024],
+                "status": ACTION_STATUS_EXECUTED,
+                "operator": operator,
+                "create_time": now.isoformat(timespec="seconds"),
+            }
+            created.append(rec)
+            rows.append(
+                (rec["id"], rec["case_id"], rec["case_no"], rec["approval_id"],
+                 rec["action"], rec["detail"], rec["status"], rec["operator"], rec["create_time"])
+            )
+        if self.enabled:
+            try:
+                with get_pool().connection() as conn, conn.cursor() as cur:
+                    cur.executemany(
+                        "INSERT INTO t_case_action (id, case_id, case_no, approval_id, "
+                        "action, detail, status, operator, create_time) "
+                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                        rows,
+                    )
+            except Exception:  # noqa: BLE001
+                logger.exception("[case] 处置动作写入失败 case=%s（降级内存）", case_id)
+                self.enabled = False
+        for rec in created:
+            self._mem_actions[rec["id"]] = dict(rec)
+        return created
+
+    def list_actions(self, case_id: str, limit: int = 100) -> list[dict]:
+        """案件处置动作列表，按创建时间倒序。"""
+        if self.enabled:
+            try:
+                with get_pool().connection() as conn, conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT id, case_id, case_no, approval_id, action, detail, status, "
+                        "operator, create_time FROM t_case_action WHERE case_id=%s "
+                        "ORDER BY create_time DESC LIMIT %s",
+                        (case_id, limit),
+                    )
+                    cols = (
+                        "id", "case_id", "case_no", "approval_id", "action", "detail",
+                        "status", "operator", "create_time",
+                    )
+                    return [dict(zip(cols, r)) for r in cur.fetchall()]
+            except Exception:  # noqa: BLE001
+                logger.exception("[case] 处置动作查询失败 case=%s", case_id)
+        rows = sorted(
+            self._mem_actions.values(),
+            key=lambda a: a.get("create_time", ""),
+            reverse=True,
+        )
+        return [dict(a) for a in rows if a.get("case_id") == case_id][:limit]
+
+    def record_audit(
+        self,
+        *,
+        case_id: str = "",
+        approval_id: str = "",
+        operation: str,
+        target: str = "",
+        operator: str = "",
+        detail: str = "",
+    ) -> dict:
+        """敏感操作审计留痕（裁决 / 归档），失败仅告警不影响主流程。"""
+        aid = next_message_id()
+        rec = {
+            "id": aid,
+            "case_id": case_id,
+            "approval_id": approval_id,
+            "operation": operation,
+            "target": target,
+            "operator": operator,
+            "detail": str(detail)[:1024],
+            "create_time": self._now().isoformat(timespec="seconds"),
+        }
+        if self.enabled:
+            try:
+                with get_pool().connection() as conn, conn.cursor() as cur:
+                    cur.execute(
+                        "INSERT INTO t_case_audit (id, case_id, approval_id, operation, "
+                        "target, operator, detail, create_time) "
+                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                        (rec["id"], rec["case_id"], rec["approval_id"], rec["operation"],
+                         rec["target"], rec["operator"], rec["detail"], rec["create_time"]),
+                    )
+            except Exception:  # noqa: BLE001
+                logger.exception("[case] 审计日志写入失败 op=%s", operation)
+                self.enabled = False
+        self._mem_audits[aid] = rec
         return dict(rec)
+
+    def list_audit(self, case_id: str, limit: int = 100) -> list[dict]:
+        """案件审计日志列表，按创建时间倒序。"""
+        if self.enabled:
+            try:
+                with get_pool().connection() as conn, conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT id, case_id, approval_id, operation, target, operator, "
+                        "detail, create_time FROM t_case_audit WHERE case_id=%s "
+                        "ORDER BY create_time DESC LIMIT %s",
+                        (case_id, limit),
+                    )
+                    cols = (
+                        "id", "case_id", "approval_id", "operation", "target",
+                        "operator", "detail", "create_time",
+                    )
+                    return [dict(zip(cols, r)) for r in cur.fetchall()]
+            except Exception:  # noqa: BLE001
+                logger.exception("[case] 审计日志查询失败 case=%s", case_id)
+        rows = sorted(
+            self._mem_audits.values(),
+            key=lambda a: a.get("create_time", ""),
+            reverse=True,
+        )
+        return [dict(a) for a in rows if a.get("case_id") == case_id][:limit]
+
+    def close_case(self, case_id: str, operator: str = "") -> dict | None:
+        """归档关闭案件（REPORTED/INVESTIGATING -> CLOSED）。重复关闭幂等返回。"""
+        now = self._now()
+        if self.enabled:
+            try:
+                with get_pool().connection() as conn, conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE t_case SET status=%s, update_time=%s "
+                        "WHERE id=%s AND status <> %s",
+                        (CASE_STATUS_CLOSED, now, case_id, CASE_STATUS_CLOSED),
+                    )
+                    closed = cur.rowcount > 0
+            except Exception:  # noqa: BLE001
+                logger.exception("[case] 案件归档失败: %s", case_id)
+                closed = None  # DB 异常：转入内存路径
+        else:
+            closed = None
+        if closed is None:
+            rec = self._mem_cases.get(case_id)
+            if rec is None:
+                return None
+            if rec.get("status") != CASE_STATUS_CLOSED:
+                rec["status"] = CASE_STATUS_CLOSED
+                rec["update_time"] = now.isoformat(timespec="seconds")
+                closed = True
+            else:
+                closed = False
+            case = dict(rec)
+        else:
+            case = self.get_case(case_id)
+            if case is None:
+                return None
+        if closed:
+            self.record_audit(
+                case_id=case_id,
+                operation=AUDIT_OPERATION_CLOSE,
+                target=case_id,
+                operator=operator,
+                detail=f"案件归档：{case.get('case_no', '')}",
+            )
+        return {"case": case, "closed": closed}
