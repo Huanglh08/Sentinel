@@ -72,6 +72,8 @@ Thumbs.db
 
 # 错误输出/临时探针/备份（Phase 开发期产物）
 *.err
+boot.out
+boot.err
 _dbprobe.py
 _probe.py
 _probe_*.txt
