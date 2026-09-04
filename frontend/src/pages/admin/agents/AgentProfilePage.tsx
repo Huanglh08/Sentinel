@@ -212,7 +212,7 @@ export function AgentProfilePage() {
                     <AgentAvatar avatar={agent.avatar} seed={agent.id} />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <h2 className="truncate text-[15px] font-semibold text-slate-900">
+                        <h2 className="truncate text-[15px] font-semibold text-slate-100">
                           {agent.name}
                         </h2>
                         {agent.builtin ? (
@@ -302,7 +302,7 @@ export function AgentProfilePage() {
             <span className="agent-card__add-icon">
               <Plus className="h-5 w-5" />
             </span>
-            <span className="text-sm font-medium text-slate-600">新建智能体</span>
+            <span className="text-sm font-medium text-slate-200">新建智能体</span>
             <span className="text-xs text-slate-400">先整套沿用「默认助手」，你改哪条生效哪条</span>
           </button>
         )}

@@ -1,0 +1,1863 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Sentinel Pages Overview · 界面总览</title>
+
+<!--
+================================================================================
+  SENTINEL PAGES OVERVIEW — 23 界面总览
+================================================================================
+  【文件定位】frontend/public/pages-overview.html
+              纯预览文件，不参与构建，不引用 frontend/src。
+
+  【页面清单（23）】
+    C端 (6)： P01 登录  P02 欢迎  P03 对话  P04 更新日志  P05 文档预览  P06 404
+    后台(17)：A00 Dashboard  A01 智能体管理  A02 提示词配置  A03 知识库管理
+             A04 文档管理  A05 分块管理  A06 知识图谱  A07 意图树配置
+             A08 意图列表  A09 数据通道  A10 关键词映射  A11 链路追踪
+             A12 审计日志  A13 案件调查  A14 用户管理  A15 示例问题
+             A16 系统设置
+
+  【共用设计参数】（与 design-workbench.html 完全一致）
+    配色 = 深空底 #04070F + 青 #22D3EE → 蓝 #3B82F6 → 紫 #7C3AED
+    侧栏 = 280px，文字区 208px，MARK_SIZE=40，BAR_GAP=8
+    对齐 = SIDE_PAD=12，opticalNudge=+12，navNudge=-10，状态 nav=NAVSTYLES[2]
+    高亮 = Notch 切角（border-left:2px + clip-path 切角）
+    图标 = Hex Shield（pad=0.172），左上角 = 图标 + sentinel（Orbitron）
+    首屏 = Fredoka × Squash 弹跳
+    侧栏分组：工作区 / 会话 / 资源 / 系统（后台侧栏再加"管理"组）
+
+  【结构】
+    每个 tile = 1280×800 原尺寸设计稿 → transform:scale(0.4) → 512×320 缩略图
+    点击 tile → 弹出 modal，原尺寸显示 1280×800 页面（侧栏可切换）
+================================================================================
+-->
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@400;500;700&family=Fredoka:wght@600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet" />
+
+<style>
+/* ==========================================================================
+   TOKENS
+   ========================================================================== */
+:root{
+  --sx-void:#04070F;--sx-deep:#070C1A;--sx-panel:#0A1020;--sx-card:#0D1426;
+  --sx-line:#1A2745;--sx-line-2:#243457;
+  --sx-cyan:#22D3EE;--sx-sky:#38BDF8;--sx-blue:#3B82F6;--sx-indigo:#6366F1;
+  --sx-violet:#7C3AED;--sx-purple:#A855F7;
+  --sx-text:#E6EDF7;--sx-dim:#7C8AA8;--sx-faint:#4A5875;
+  --sx-grad:linear-gradient(135deg,#22D3EE 0%,#3B82F6 48%,#7C3AED 100%);
+  --sx-grad-soft:linear-gradient(135deg,#38BDF8 0%,#6366F1 55%,#A855F7 100%);
+  --ff-display:"Orbitron",sans-serif;
+  --ff-mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
+  --ff-cartoon:"Fredoka","Segoe UI",sans-serif;
+  --ff-cn:"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+
+  /* 已定稿侧栏几何 */
+  --side-w:280px; --side-pad:12px; --mark-size:40px; --bar-gap:8px;
+  --text-w:208px; /* = 280 - 24(pad) - 40(icon) - 8(gap) */
+  --optical-nudge:12px; --nav-nudge:-10px;
+}
+
+/* ==========================================================================
+   重置 + 底
+   ========================================================================== */
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--sx-void);color:var(--sx-text);font-family:var(--ff-cn);min-height:100vh;
+  -webkit-font-smoothing:antialiased}
+body::before{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.45;
+  background-image:linear-gradient(rgba(34,211,238,.045) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(34,211,238,.045) 1px,transparent 1px);
+  background-size:52px 52px;
+  mask-image:radial-gradient(ellipse 90% 70% at 50% 0%,#000 10%,transparent 72%);
+  -webkit-mask-image:radial-gradient(ellipse 90% 70% at 50% 0%,#000 10%,transparent 72%)}
+body::after{content:"";position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.4;
+  background:radial-gradient(900px 480px at 8% -6%,rgba(124,58,237,.22),transparent 60%),
+             radial-gradient(760px 420px at 92% 2%,rgba(34,211,238,.14),transparent 62%)}
+
+/* ==========================================================================
+   HUD
+   ========================================================================== */
+.hud{position:sticky;top:0;z-index:60;display:flex;align-items:center;gap:16px;flex-wrap:wrap;
+  padding:11px 22px;background:rgba(7,12,26,.86);backdrop-filter:blur(14px);
+  border-bottom:1px solid var(--sx-line)}
+.hud .logo{display:flex;align-items:center;gap:10px}
+.hud .logo .dot{width:9px;height:9px;border-radius:50%;background:var(--sx-cyan);
+  box-shadow:0 0 12px rgba(34,211,238,.55),0 0 34px rgba(34,211,238,.22);animation:livepulse 2.4s ease-in-out infinite}
+@keyframes livepulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.82)}}
+.hud h1{margin:0;font-family:var(--ff-display);font-size:14.5px;font-weight:700;letter-spacing:.16em;text-transform:uppercase}
+.hud .sub{font-family:var(--ff-mono);font-size:10.5px;color:var(--sx-faint);letter-spacing:.1em;
+  border-left:1px solid var(--sx-line);padding-left:14px}
+.hud .spacer{flex:1}
+.btn{font-family:var(--ff-mono);font-size:11px;letter-spacing:.06em;background:var(--sx-card);color:var(--sx-dim);
+  border:1px solid var(--sx-line-2);border-radius:4px;padding:6px 12px;cursor:pointer;transition:.18s;
+  clip-path:polygon(6px 0,100% 0,100% calc(100% - 6px),calc(100% - 6px) 100%,0 100%,0 6px)}
+.btn:hover{color:var(--sx-cyan);border-color:rgba(34,211,238,.45)}
+
+/* ==========================================================================
+   TABS
+   ========================================================================== */
+.tabs{position:sticky;top:52px;z-index:55;display:flex;gap:2px;padding:0 22px;
+  background:rgba(7,12,26,.78);backdrop-filter:blur(10px);border-bottom:1px solid var(--sx-line)}
+.tabs button{font-family:var(--ff-mono);font-size:11px;letter-spacing:.05em;color:var(--sx-faint);
+  background:transparent;border:0;border-bottom:2px solid transparent;padding:9px 13px;cursor:pointer;
+  transition:.18s;display:flex;align-items:center;gap:7px}
+.tabs button:hover{color:var(--sx-text)}
+.tabs button.cur{color:var(--sx-cyan);border-bottom-color:var(--sx-cyan)}
+.tabs button i{font-style:normal;opacity:.5;font-size:10px}
+.tabs .cnt{font-family:var(--ff-mono);font-size:10px;color:var(--sx-faint);background:var(--sx-panel);
+  border:1px solid var(--sx-line);padding:1px 6px;border-radius:3px}
+.tabs button.cur .cnt{color:var(--sx-cyan);border-color:rgba(34,211,238,.35);background:rgba(34,211,238,.07)}
+
+/* ==========================================================================
+   GRID
+   ========================================================================== */
+main{position:relative;z-index:1;max-width:1380px;margin:0 auto;padding:24px 22px 80px}
+.g{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:18px}
+.tile{position:relative;background:linear-gradient(160deg,rgba(13,20,38,.92),rgba(7,12,26,.92));
+  border:1px solid var(--sx-line);border-radius:6px;padding:14px;cursor:pointer;transition:.2s;
+  clip-path:polygon(12px 0,100% 0,100% calc(100% - 12px),calc(100% - 12px) 100%,0 100%,0 12px)}
+.tile:hover{border-color:rgba(34,211,238,.5);transform:translateY(-2px)}
+.tile::before,.tile::after{content:"";position:absolute;width:10px;height:10px;pointer-events:none}
+.tile::before{top:6px;right:6px;border-top:1px solid var(--sx-cyan);border-right:1px solid var(--sx-cyan);opacity:.5}
+.tile::after{bottom:6px;left:6px;border-bottom:1px solid var(--sx-cyan);border-left:1px solid var(--sx-cyan);opacity:.5}
+.tile .ph{margin:0 0 8px;display:flex;align-items:baseline;gap:10px;position:relative}
+.tile .pid{font-family:var(--ff-mono);font-size:10.5px;color:var(--sx-cyan);letter-spacing:.12em;
+  border:1px solid rgba(34,211,238,.3);border-radius:3px;padding:2px 7px;background:rgba(34,211,238,.07)}
+.tile-cf{position:absolute;top:-2px;right:0;font-family:var(--ff-mono);font-size:9.5px;font-weight:700;
+  color:#FEE2E2;background:#B91C1C;border:1px solid #F87171;border-radius:3px;padding:2px 7px;
+  box-shadow:0 0 10px rgba(248,113,113,.6);cursor:pointer}
+.tile .ttl{margin:0;font-family:var(--ff-display);font-size:14.5px;font-weight:700;letter-spacing:.03em}
+.tile .dsc{margin:0 0 10px;font-size:12px;color:var(--sx-dim);line-height:1.7}
+
+/* 缩略图舞台 */
+.thumb{position:relative;width:100%;height:300px;overflow:hidden;border-radius:5px;border:1px solid var(--sx-line);
+  background:#02050B}
+.thumb .ph-old{padding:10px;position:absolute;top:8px;left:10px;z-index:3;
+  font-family:var(--ff-mono);font-size:9px;color:var(--sx-faint);letter-spacing:.1em}
+.thumb .stage{position:absolute;top:0;left:0;width:1280px;height:800px;transform:scale(.234);
+  transform-origin:0 0;background:var(--sx-void);overflow:hidden;pointer-events:none}
+.thumb .stage::before{content:"";position:absolute;inset:0;z-index:0;background:radial-gradient(900px 480px at 8% -6%,rgba(124,58,237,.18),transparent 60%),
+   radial-gradient(760px 420px at 92% 2%,rgba(34,211,238,.12),transparent 62%);pointer-events:none}
+.thumb .stage::after{content:"";position:absolute;inset:0;background-image:linear-gradient(rgba(34,211,238,.04) 1px,transparent 1px),
+   linear-gradient(90deg,rgba(34,211,238,.04) 1px,transparent 1px);background-size:46px 46px;
+   mask-image:radial-gradient(ellipse 80% 70% at 50% 45%,#000 18%,transparent 78%);pointer-events:none}
+
+/* ==========================================================================
+   MODAL（原尺寸 1280×800 预览）
+   ========================================================================== */
+.modal{position:fixed;inset:0;z-index:200;display:none;background:rgba(2,5,11,.92);backdrop-filter:blur(6px)}
+.modal.open{display:flex;align-items:center;justify-content:center}
+.modal .box{position:relative;background:var(--sx-panel);border:1px solid var(--sx-line-2);
+  border-radius:8px;box-shadow:0 30px 90px -20px rgba(0,0,0,.7);padding:12px;
+  clip-path:polygon(20px 0,100% 0,100% calc(100% - 20px),calc(100% - 20px) 100%,0 100%,0 20px)}
+.modal .hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;padding:0 4px;gap:12px}
+.modal .hd .nm{display:flex;align-items:center;gap:10px}
+.modal .hd .nm .pid{font-family:var(--ff-mono);font-size:11px;color:var(--sx-cyan);letter-spacing:.12em;
+  border:1px solid rgba(34,211,238,.3);border-radius:3px;padding:2px 8px;background:rgba(34,211,238,.07)}
+.modal .hd .nm h2{margin:0;font-family:var(--ff-display);font-size:15px;font-weight:700;letter-spacing:.03em}
+.modal .hd .meta{font-family:var(--ff-mono);font-size:10.5px;color:var(--sx-faint)}
+.modal .hd .x{font-family:var(--ff-mono);font-size:13px;color:var(--sx-dim);background:transparent;border:1px solid var(--sx-line-2);
+  border-radius:4px;padding:5px 10px;cursor:pointer}
+.modal .hd .x:hover{color:var(--sx-cyan);border-color:rgba(34,211,238,.45)}
+/* 缩放容器：cv 以 1280×800 布局，整体 transform:scale 到可视范围 */
+.modal .cvwrap{position:relative;width:1280px;height:800px;margin:0 auto;
+  transform-origin:center center}
+/* 翻页切换动画 */
+.modal .cvwrap.pg-out{animation:pgOut .42s cubic-bezier(.5,.05,.4,1) forwards}
+.modal .cvwrap.pg-in{animation:pgIn .42s cubic-bezier(.5,.05,.4,1) forwards}
+@keyframes pgOut{to{transform:perspective(1500px) rotateY(-92deg);opacity:0}}
+@keyframes pgIn{from{transform:perspective(1500px) rotateY(92deg);opacity:0}to{transform:perspective(1500px) rotateY(0);opacity:1}}
+.modal .cv{position:relative;width:1280px;height:800px;background:var(--sx-void);overflow:hidden;
+  border:1px solid var(--sx-line);border-radius:6px}
+.modal .cv::-webkit-scrollbar{display:none}
+/* modal 冲突工具条 */
+.modal .cf{display:flex;align-items:center;gap:8px}
+.modal .cf .cfbtn{font-family:var(--ff-mono);font-size:10.5px;color:#FCA5A5;
+  background:rgba(185,28,28,.15);border:1px solid rgba(248,113,113,.5);border-radius:4px;
+  padding:5px 10px;cursor:pointer;transition:.16s}
+.modal .cf .cfbtn:hover{background:rgba(185,28,28,.3)}
+.modal .cf .cflist{position:absolute;right:0;top:110%;background:rgba(20,8,8,.95);border:1px solid #F87171;
+  border-radius:5px;padding:6px;min-width:220px;z-index:80;box-shadow:0 12px 30px -8px rgba(0,0,0,.7)}
+.modal .cf .cflist.hide{display:none}
+.modal .cf .cflist .it{padding:6px 9px;border-radius:3px;font-family:var(--ff-mono);font-size:10.5px;
+  color:#FECACA;cursor:pointer;transition:.12s}
+.modal .cf .cflist .it:hover{background:rgba(248,113,113,.25);color:#fff}
+.modal .cf .cflist .empty{padding:6px 9px;color:#FCA5A5;font-family:var(--ff-mono);font-size:10.5px}
+
+/* ==========================================================================
+   页面级共用组件 .pg-*（在原尺寸画布上）
+   设计基准 = 1280 × 800
+   ========================================================================== */
+
+/* ==========================================================================
+   侧栏 —— 独立化布局（绝对坐标，区块互不挤占）
+   坐标系 = 1280×800 画布。侧栏占左 280px 全高。
+   侧栏内部各区块均用绝对 top/left/width/height，不依赖彼此。
+   ========================================================================== */
+.sc-side{position:absolute;top:0;left:0;width:var(--side-w);height:800px;
+  background:rgba(8,13,26,.78);backdrop-filter:blur(14px);border-right:1px solid var(--sx-line);
+  z-index:5}
+
+/* 品牌区：顶部 12px 起，高 52px */
+.sc-side .bar{position:absolute;top:12px;left:12px;width:256px;height:52px;
+  display:flex;align-items:center;gap:var(--bar-gap);
+  border-bottom:1px solid var(--sx-line)}
+.sc-side .mk{width:var(--mark-size);height:var(--mark-size);flex:none;
+  margin-left:var(--optical-nudge); /* 抵消 SVG pad，由 JS 精确覆盖 */
+  display:flex;align-items:center;justify-content:center}
+.sc-side .mk svg{width:100%;height:100%;display:block;filter:drop-shadow(0 0 8px rgba(34,211,238,.35))}
+/* 图标动效 */
+.mk-anim .mk-float{transform-box:view-box;transform-origin:50% 60%;animation:mkFloat 4.2s ease-in-out infinite}
+.mk-anim .mk-scan{animation:mkScan 3.2s ease-in-out infinite}
+.mk-anim .mk-trace{stroke-dasharray:80;stroke-dashoffset:80;animation:mkTrace 3.4s ease-in-out infinite}
+@keyframes mkFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-1.4px)}}
+@keyframes mkScan{0%,100%{transform:translateY(0);opacity:0}14%{opacity:.9}50%{transform:translateY(30px);opacity:.9}86%{opacity:0}}
+@keyframes mkTrace{0%{stroke-dashoffset:80}45%,62%{stroke-dashoffset:0}100%{stroke-dashoffset:-80}}
+.sc-side .mk svg{width:100%;height:100%;display:block}
+.sc-side .txtbox{width:var(--text-w);overflow:hidden;display:flex;align-items:center;height:40px}
+.sc-side .wm{font-family:var(--ff-display);font-weight:700;font-size:24px;line-height:1.15;letter-spacing:.02em}
+.sc-side .wm .tx{background-image:var(--sx-grad-soft);background-size:220% 100%;
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;
+  animation:wmFlow 7s linear infinite}
+@keyframes wmFlow{from{background-position:0 50%}to{background-position:220% 50%}}
+
+/* 导航区：品牌区下方起，到账户区之上 */
+.sc-side .nav{position:absolute;top:76px;left:12px;width:256px;bottom:60px;overflow:auto}
+
+/* 账户入口（左下角吸底） */
+.sc-side .acct{position:absolute;left:12px;right:12px;bottom:12px;height:52px;
+  display:flex;align-items:center;gap:10px;cursor:pointer;
+  border-top:1px solid var(--sx-line);padding-top:10px}
+.sc-side .avt{width:34px;height:34px;border-radius:8px;background:var(--sx-grad);
+  font-family:var(--ff-display);font-weight:700;font-size:13px;color:#04070F;
+  display:flex;align-items:center;justify-content:center;flex:none}
+.sc-side .acct .nm{font-size:13px;font-weight:600;color:var(--sx-text)}
+.sc-side .acct .role{font-family:var(--ff-mono);font-size:9.5px;color:var(--sx-faint);letter-spacing:.02em;margin-top:3px}
+/* 侧栏文字可读性：提高字号/对比度，减小中文过散字距，保留既定几何与 Notch 高亮 */
+.sc-side .navgroup{font-family:var(--ff-cn);font-size:11px;font-weight:700;letter-spacing:.035em;color:#A8B7D4;
+  padding:13px 10px 6px;text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased}
+.sc-side .navgroup:first-child{padding-top:0}
+
+.navitem{display:flex;align-items:center;gap:8px;position:relative;
+  font-size:13.5px;font-weight:600;color:#D2DCF0;letter-spacing:0;line-height:1.35;
+  padding:7px 10px;margin-bottom:2px;border:1px solid transparent;border-radius:4px;cursor:default;
+  text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased;
+  transition:background .16s,color .16s,border-color .16s,box-shadow .16s}
+.navitem > svg{width:16px;height:16px;flex:none;opacity:.86;transition:.16s}
+.navitem:hover{color:#F4F8FF;background:rgba(255,255,255,.045)}
+.navitem.act{color:#67E8F9;font-weight:700}
+.navitem.act > svg{opacity:1}
+
+/* 已定稿 = Notch 切角 */
+.ns-notch .navitem{border-radius:0}
+.ns-notch .navitem.act{background:linear-gradient(90deg,rgba(34,211,238,.17),rgba(34,211,238,.015) 72%);
+  border-color:transparent;border-left:2px solid var(--sx-cyan);padding-left:9px;
+  clip-path:polygon(0 0,100% 0,100% calc(100% - 7px),calc(100% - 7px) 100%,0 100%)}
+
+/* 子项（历史会话） */
+.sc-side .subitem{display:flex;align-items:center;gap:9px;position:relative;
+  font-size:13px;font-weight:500;color:#AEBBD3;line-height:1.35;padding:6px 10px 6px 26px;
+  margin-bottom:1px;border:1px solid transparent;border-left:2px solid transparent;border-radius:0;
+  cursor:default;transition:.16s;font-family:var(--ff-cn);text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased}
+.sc-side .subitem .dd{font-size:10px;color:#8290AA;flex:none;font-weight:500;margin-left:auto;padding-left:8px;letter-spacing:0}
+.sc-side .subitem.act{color:#F4F8FF;background:linear-gradient(90deg,rgba(34,211,238,.17),rgba(34,211,238,.015) 72%);
+  border-left-color:var(--sx-cyan);font-weight:700;clip-path:polygon(0 0,100% 0,100% calc(100% - 7px),calc(100% - 7px) 100%,0 100%)}
+
+/* ==========================================================================
+   主内容区 —— 独立化布局（绝对坐标，与侧栏互不依赖）
+   侧栏 280px，故 main 固定 left=280 width=1000，不依赖侧栏宽度变量。
+   ========================================================================== */
+.sc-main{position:absolute;top:0;left:280px;width:1000px;height:800px;overflow:hidden}
+.sc-main.no-topbar .pg-mid{top:0}
+
+/* 顶栏：包含完整背景区域，高度 54px；对话/内容区从其下方开始 */
+.pg-top{position:absolute;z-index:20;top:0;left:0;right:0;height:54px;
+  display:flex;align-items:center;padding:0 24px;
+  border-bottom:1px solid var(--sx-line);background:#080D1A;backdrop-filter:blur(10px);color:var(--sx-dim);font-size:13px}
+.pg-top .crumb{display:flex;align-items:center;gap:8px;font-family:var(--ff-cn)}
+.pg-top .crumb i{font-style:normal;color:var(--sx-faint);font-family:var(--ff-mono);font-size:11px}
+.pg-top .crumb em{font-style:normal;color:var(--sx-cyan);font-weight:600}
+.pg-top .r{margin-left:auto;display:flex;gap:14px;align-items:center}
+.pg-top .search{display:flex;align-items:center;gap:8px;background:rgba(7,12,26,.6);
+  border:1px solid var(--sx-line-2);border-radius:6px;padding:6px 12px;width:220px;transition:.18s}
+.pg-top .search:hover,.pg-top .search:focus-within{border-color:rgba(34,211,238,.45)}
+.pg-top .search svg{width:13px;height:13px;color:var(--sx-faint);flex:none}
+.pg-top .search input{flex:1;background:transparent;border:0;outline:0;color:var(--sx-text);font-size:12.5px;font-family:var(--ff-cn)}
+.pg-top .search input::placeholder{color:var(--sx-faint)}
+.pg-top .bell{position:relative;width:32px;height:32px;border-radius:6px;display:flex;align-items:center;justify-content:center;
+  color:var(--sx-dim);background:rgba(13,20,38,.5);border:1px solid var(--sx-line-2);cursor:pointer;transition:.16s}
+.pg-top .bell:hover{color:var(--sx-cyan);border-color:rgba(34,211,238,.4)}
+.pg-top .bell .dot{position:absolute;top:6px;right:7px;width:6px;height:6px;border-radius:50%;background:#F87171;box-shadow:0 0 6px #F87171}
+.pg-top .bell svg{width:15px;height:15px}
+.pg-top .user{display:flex;align-items:center;gap:9px;padding:4px 8px 4px 4px;border-radius:8px;cursor:pointer;transition:.16s}
+.pg-top .user:hover{background:rgba(255,255,255,.04)}
+.pg-top .user .uavt{width:28px;height:28px;border-radius:50%;background:var(--sx-grad);
+  display:flex;align-items:center;justify-content:center;font-family:var(--ff-display);font-weight:700;font-size:11px;color:#04070F}
+.pg-top .user .unm{font-size:12px;font-weight:600;color:var(--sx-text);line-height:1.1}
+.pg-top .user .urole{font-family:var(--ff-mono);font-size:9px;color:var(--sx-faint);margin-top:1px}
+.pg-top .pill{font-family:var(--ff-mono);font-size:10.5px;color:var(--sx-faint);
+  border:1px solid var(--sx-line);border-radius:4px;padding:3px 9px}
+.pg-top .pill.cy{color:var(--sx-cyan);border-color:rgba(34,211,238,.3);background:rgba(34,211,238,.05)}
+
+/* 主内容：顶栏下方到 main 底部，锚定 sc-main 左右 */
+.pg-mid{position:absolute;top:54px;left:0;right:0;bottom:0;overflow:hidden;display:flex;flex-direction:column;background:#04070F;border-top:1px solid rgba(34,211,238,.08)}
+.sc-main.no-topbar .pg-mid{border-top:0}
+
+/* 通用首屏 */
+.pg-hero{position:relative;flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;padding:30px;gap:18px}
+.pg-hero .wmc{display:inline-block;font-family:var(--ff-cartoon);
+  font-size:80px;font-weight:700;line-height:1.2;letter-spacing:.01em;white-space:nowrap;padding-bottom:.14em}
+.pg-hero .wmc .ch{position:relative;display:inline-block;transform-origin:50% 88%;will-change:transform}
+.pg-hero .wmc .ch-txt{display:inline-block;background-image:var(--sx-grad-soft);background-size:210% 100%;
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;
+  animation:wmFlow 7s linear infinite}
+.pg-hero .wmc .ch-sh{position:absolute;left:50%;bottom:-.06em;width:.78em;height:.13em;border-radius:50%;
+  background:radial-gradient(ellipse at center,rgba(34,211,238,.5),rgba(34,211,238,0) 72%);
+  transform:translateX(-50%);pointer-events:none}
+.b-squash .ch{animation:bSq 2.4s infinite;animation-delay:calc(var(--i) * .07s)}
+.b-squash .ch-sh{animation:sSq 2.4s infinite;animation-delay:calc(var(--i) * .07s)}
+@keyframes bSq{
+  0%,52%,100%{transform:translateY(0) scale(1,1);animation-timing-function:ease-in-out}
+  56%{transform:translateY(4px) scale(1.14,.86);animation-timing-function:cubic-bezier(.2,.7,.4,1)}
+  63%{transform:translateY(-35px) scale(.92,1.12);animation-timing-function:cubic-bezier(.4,0,.6,1)}
+  71%{transform:translateY(-43px) scale(1,1);animation-timing-function:cubic-bezier(.5,0,.7,.6)}
+  79%{transform:translateY(-6px) scale(.95,1.08);animation-timing-function:cubic-bezier(.3,0,.7,1)}
+  85%{transform:translateY(0) scale(1.28,.74);animation-timing-function:cubic-bezier(.2,.9,.4,1)}
+  90%{transform:translateY(-10px) scale(.97,1.05);animation-timing-function:cubic-bezier(.4,0,.6,1)}
+  94%{transform:translateY(0) scale(1.11,.91);animation-timing-function:ease-out}
+  97%{transform:translateY(0) scale(1.03,.97)}}
+@keyframes sSq{
+  0%,52%,100%{transform:translateX(-50%) scale(1);opacity:.45}
+  71%{transform:translateX(-50%) scale(.58);opacity:.14}
+  85%{transform:translateX(-50%) scale(1.30);opacity:.55}
+  94%{transform:translateX(-50%) scale(1.06);opacity:.48}}
+
+.pg-hero .lead{font-size:14px;color:var(--sx-dim);max-width:520px;line-height:1.8;font-weight:400}
+.pg-hero .cta{display:flex;gap:10px;margin-top:6px}
+.pg-btn{font-family:var(--ff-display);font-weight:700;font-size:12px;letter-spacing:.1em;text-transform:uppercase;
+  border-radius:4px;padding:10px 20px;cursor:pointer;transition:.2s;
+  clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px)}
+.pg-btn.pri{background:var(--sx-grad);color:#04070F;border:0;box-shadow:0 8px 24px -8px rgba(34,211,238,.5)}
+.pg-btn.ghost{background:transparent;color:var(--sx-cyan);border:1px solid rgba(34,211,238,.3)}
+
+/* ==========================================================================
+   C端 对话 —— 参照主流 AI agent（ChatGPT/Claude/Kimi）
+   消息 = 宽整行，助手靠左带头像，用户靠右整行，不贴小气泡
+   输入框 = 居中大输入框
+   ========================================================================== */
+.pg-conv{flex:1;display:flex;flex-direction:column;padding:36px 56px;overflow:auto;gap:6px;min-height:0}
+
+/* 每条消息是一整行（flex row，自动换行区在右侧可扩展） */
+.pg-conv .b{display:flex;gap:14px;align-items:flex-start;padding:14px 0}
+/* 助手消息：头像在左，内容整行左对齐 */
+.pg-conv .b.ai{justify-content:flex-start}
+.pg-conv .b.ai .avt{width:34px;height:34px;border-radius:8px;background:var(--sx-grad);flex:none;margin-top:2px;
+  box-shadow:0 0 12px rgba(34,211,238,.35);position:relative;overflow:hidden}
+.pg-conv .b.ai .avt::after{content:"";position:absolute;left:-4px;right:-4px;height:2px;top:0;
+  background:linear-gradient(90deg,transparent,#E0F7FA,transparent);animation:avtScan 3.4s ease-in-out infinite}
+@keyframes avtScan{0%,100%{top:0}50%{top:32px}}
+.pg-conv .b.ai .body{flex:1;max-width:720px}
+.pg-conv .b.ai .who{font-weight:600;color:var(--sx-cyan);font-size:13px;letter-spacing:.03em;margin-bottom:8px}
+.pg-conv .b.ai .txt{font-size:15px;line-height:1.8;color:#D7E2F5}
+.pg-conv .b.ai .txt code{font-family:var(--ff-mono);font-size:13px;color:var(--sx-sky);
+  background:rgba(56,189,248,.1);padding:1px 6px;border-radius:4px}
+
+/* 用户消息：右侧整行，无气泡框（主流做法） */
+.pg-conv .b.me{justify-content:flex-end}
+.pg-conv .b.me .body{max-width:720px;text-align:right}
+.pg-conv .b.me .who{font-weight:600;color:var(--sx-dim);font-size:13px;letter-spacing:.03em;margin-bottom:8px}
+.pg-conv .b.me .txt{display:inline-block;font-size:15px;line-height:1.8;color:var(--sx-text);
+  background:linear-gradient(135deg,rgba(59,130,246,.16),rgba(124,58,237,.16));
+  border:1px solid rgba(34,211,238,.25);border-radius:14px;padding:10px 18px;max-width:560px}
+
+/* 动作条 */
+.pg-conv .act{display:flex;gap:4px;align-items:center;margin-top:10px}
+.pg-conv .act .v-btn{width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;
+  cursor:pointer;color:#8A9BBD;background:transparent;border:1px solid transparent;transition:.16s}
+.pg-conv .act .v-btn:hover{color:var(--sx-cyan);background:rgba(34,211,238,.1);border-color:rgba(34,211,238,.3)}
+.pg-conv .act .v-btn svg{width:14px;height:14px}
+/* 助手动作条常亮，用户 hover 显现 */
+.pg-conv .b.ai .act{opacity:1}
+.pg-conv .b.me .act{justify-content:flex-end;opacity:0;transition:opacity .18s}
+.pg-conv .b.me:hover .act{opacity:1}
+
+/* 输入框：居中大输入框 */
+.pg-input{padding:22px 56px 34px;border-top:1px solid var(--sx-line);background:rgba(8,13,26,.5);backdrop-filter:blur(10px)}
+.pg-input .box{max-width:720px;margin:0 auto;display:flex;align-items:flex-end;gap:12px;
+  background:rgba(13,20,38,.9);border:1px solid var(--sx-line-2);border-radius:14px;
+  padding:14px 16px;min-height:64px;transition:border-color .2s,box-shadow .2s}
+.pg-input .box:focus-within{border-color:rgba(34,211,238,.5);box-shadow:0 0 0 3px rgba(34,211,238,.12)}
+.pg-input input{flex:1;background:transparent;border:0;outline:0;color:var(--sx-text);font-size:15px;font-family:var(--ff-cn);
+  line-height:1.6;min-height:32px;resize:none}
+.pg-input input::placeholder{color:var(--sx-faint)}
+.pg-input .send{flex:none;font-family:var(--ff-mono);font-weight:700;font-size:12px;letter-spacing:.08em;
+  color:#04070F;background:var(--sx-grad);padding:10px 22px;border-radius:9px;cursor:pointer;
+  transition:opacity .2s,transform .1s}
+.pg-input .send:hover{opacity:.9}
+.pg-input .send:active{transform:translateY(1px)}
+
+/* 登录页 */
+.pg-login{display:flex;flex:1;align-items:center;justify-content:center}
+.pg-login .card{width:380px;padding:30px 32px 28px;background:rgba(13,20,38,.7);backdrop-filter:blur(14px);
+  border:1px solid var(--sx-line-2);border-radius:7px;
+  clip-path:polygon(14px 0,100% 0,100% calc(100% - 14px),calc(100% - 14px) 100%,0 100%,0 14px)}
+.pg-login h3{margin:0 0 4px;font-family:var(--ff-display);font-size:15px;font-weight:700;letter-spacing:.04em}
+.pg-login .lead{margin:0 0 22px;font-size:12px;color:var(--sx-dim)}
+.pg-login label{display:block;font-size:11px;color:var(--sx-dim);margin-bottom:5px;margin-top:14px;font-weight:500}
+.pg-login label:first-of-type{margin-top:0}
+.pg-login input{width:100%;background:rgba(7,12,26,.6);border:1px solid var(--sx-line-2);border-radius:4px;
+  padding:10px 12px;color:var(--sx-text);font-size:13px;font-family:var(--ff-cn);outline:none;transition:.16s}
+.pg-login input:focus{border-color:rgba(34,211,238,.5);background:rgba(7,12,26,.85)}
+.pg-login .submit{margin-top:24px;width:100%;background:var(--sx-grad);color:#04070F;font-weight:700;
+  font-family:var(--ff-display);font-size:12px;letter-spacing:.1em;text-transform:uppercase;
+  border:0;padding:12px;border-radius:4px;cursor:pointer;
+  clip-path:polygon(7px 0,100% 0,100% calc(100% - 7px),calc(100% - 7px) 100%,0 100%,0 7px)}
+.pg-login .hint{margin-top:14px;text-align:center;font-size:11px;color:var(--sx-faint)}
+.pg-login .hint a{color:var(--sx-cyan);text-decoration:none}
+
+/* 通用卡片/章节 */
+.pg-body{position:absolute;top:54px;left:0;right:0;bottom:0;overflow:auto;padding:22px 26px}
+.pg-hd{display:flex;align-items:baseline;gap:14px;margin-bottom:18px}
+.pg-hd h1{margin:0;font-family:var(--ff-display);font-size:22px;font-weight:700;letter-spacing:.03em}
+.pg-hd .sub{font-size:12.5px;color:var(--sx-dim)}
+.pg-hd .r{margin-left:auto;display:flex;gap:8px}
+.tbtn{font-family:var(--ff-mono);font-size:10.5px;color:var(--sx-cyan);background:transparent;
+  border:1px solid rgba(34,211,238,.35);border-radius:4px;padding:6px 12px;cursor:pointer;transition:.16s;
+  clip-path:polygon(5px 0,100% 0,100% calc(100% - 5px),calc(100% - 5px) 100%,0 100%,0 5px)}
+.tbtn:hover{background:rgba(34,211,238,.1)}
+.tbtn.ghost{color:var(--sx-dim);border-color:var(--sx-line-2)}
+.tbtn.ghost:hover{color:var(--sx-text);border-color:var(--sx-line-2);background:rgba(255,255,255,.04)}
+
+.kpi{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
+.kpi .c{background:var(--sx-card);border:1px solid var(--sx-line);border-radius:5px;padding:14px 16px;
+  clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px)}
+.kpi .c .lbl{font-family:var(--ff-mono);font-size:10px;color:var(--sx-faint);letter-spacing:.06em;text-transform:uppercase}
+.kpi .c .val{font-family:var(--ff-display);font-weight:700;font-size:26px;color:var(--sx-text);line-height:1.1;margin-top:6px}
+.kpi .c .delta{font-size:11px;margin-top:6px;color:#34D399;font-family:var(--ff-mono)}
+.kpi .c .delta.dn{color:#F87171}
+
+.panel{background:var(--sx-card);border:1px solid var(--sx-line);border-radius:5px;padding:18px 20px}
+.panel h3{margin:0 0 12px;font-family:var(--ff-display);font-size:13px;font-weight:700;letter-spacing:.04em}
+.panel table{width:100%;border-collapse:collapse;font-size:12px}
+.panel table th{font-family:var(--ff-mono);font-size:10px;color:var(--sx-faint);text-align:left;font-weight:500;
+  padding:8px 10px;border-bottom:1px solid var(--sx-line);text-transform:uppercase;letter-spacing:.06em}
+.panel table td{padding:9px 10px;border-bottom:1px solid var(--sx-line);color:var(--sx-text)}
+.panel table tr:last-child td{border-bottom:0}
+.panel table tr:hover td{background:rgba(34,211,238,.04)}
+.tag{font-family:var(--ff-mono);font-size:10px;padding:2px 7px;border-radius:3px;letter-spacing:.03em}
+.tag.cy{color:var(--sx-cyan);border:1px solid rgba(34,211,238,.35);background:rgba(34,211,238,.07)}
+.tag.vi{color:var(--sx-purple);border:1px solid rgba(168,85,247,.35);background:rgba(168,85,247,.07)}
+.tag.ok{color:#34D399;border:1px solid rgba(52,211,153,.35);background:rgba(52,211,153,.07)}
+.tag.wn{color:#FBBF24;border:1px solid rgba(251,191,36,.35);background:rgba(251,191,36,.07)}
+.tag.bd{color:#F87171;border:1px solid rgba(248,113,113,.35);background:rgba(248,113,113,.07)}
+
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px}
+.row3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.row23{display:grid;grid-template-columns:2fr 1fr;gap:14px}
+
+/* 伪图表 */
+.chart{height:200px;position:relative;background:linear-gradient(180deg,rgba(34,211,238,.04),transparent);
+  border-radius:4px;padding:10px;overflow:hidden}
+.chart svg{width:100%;height:100%;display:block}
+.chart .ax{position:absolute;font-family:var(--ff-mono);font-size:9px;color:var(--sx-faint)}
+
+/* 知识图谱 */
+.graph{position:relative;height:100%;background:radial-gradient(600px 360px at 50% 50%,rgba(124,58,237,.18),transparent 70%);overflow:hidden}
+.graph svg{position:absolute;inset:0;width:100%;height:100%}
+.graph .lbl{position:absolute;font-family:var(--ff-cn);font-size:10.5px;color:var(--sx-text);
+  background:rgba(7,12,26,.85);padding:2px 7px;border-radius:3px;border:1px solid var(--sx-line-2)}
+.graph .lbl.cyan{color:var(--sx-cyan);border-color:rgba(34,211,238,.4)}
+
+/* 通用列表 */
+.lst-item{display:flex;align-items:center;gap:12px;padding:11px 14px;background:var(--sx-card);
+  border:1px solid var(--sx-line);border-radius:5px;margin-bottom:8px;
+  clip-path:polygon(7px 0,100% 0,100% calc(100% - 7px),calc(100% - 7px) 100%,0 100%,0 7px)}
+.lst-item .ic{width:30px;height:30px;border-radius:5px;background:rgba(34,211,238,.1);display:flex;align-items:center;justify-content:center;
+  border:1px solid rgba(34,211,238,.3);color:var(--sx-cyan);flex:none}
+.lst-item .ic svg{width:14px;height:14px}
+.lst-item .nm{font-size:13px;font-weight:600;color:var(--sx-text)}
+.lst-item .dsc{font-size:11px;color:var(--sx-dim);margin-top:2px}
+.lst-item .r{margin-left:auto;display:flex;align-items:center;gap:8px}
+
+/* 更新日志 */
+.chn{padding:16px 18px;background:var(--sx-card);border:1px solid var(--sx-line);border-radius:5px;margin-bottom:10px;
+  clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px)}
+.chn .v{font-family:var(--ff-display);font-weight:700;font-size:14px;color:var(--sx-cyan);letter-spacing:.04em}
+.chn .d{font-family:var(--ff-mono);font-size:10px;color:var(--sx-faint);margin-left:10px}
+.chn ul{margin:8px 0 0;padding-left:20px;font-size:12.5px;color:var(--sx-text);line-height:1.85}
+.chn ul li b{color:#34D399;font-weight:600}
+.chn ul li i{font-style:normal;color:var(--sx-purple);font-weight:600}
+
+/* ==========================================================================
+   ADM —— P05 风格后台统一框架
+   左分栏导航 + 右侧留白内容区，一屏可见、不塞满、不滚动
+   ========================================================================== */
+.adm{position:absolute;top:54px;left:0;right:0;bottom:0;display:flex;overflow:hidden;--adm-nav-w:190px}
+/* 左侧分类导航栏 */
+.adm-nav{width:var(--adm-nav-w);flex:none;border-right:1px solid var(--sx-line);background:rgba(8,13,26,.35);padding:20px 10px;overflow:auto}
+.adm-resizer{position:absolute;top:0;bottom:0;left:calc(var(--adm-nav-w) - 4px);width:8px;z-index:5;cursor:col-resize;touch-action:none}
+.adm-resizer::after{content:"";position:absolute;top:0;bottom:0;left:3px;width:1px;background:transparent;transition:background .15s}
+.adm-resizer:hover::after,.adm.is-resizing .adm-resizer::after{background:var(--sx-cyan)}
+.adm.is-resizing,.adm.is-resizing *{cursor:col-resize!important;user-select:none}
+.adm-nav .grp{margin-bottom:20px}
+.adm-nav .grp h4{margin:0 0 9px;font-family:var(--ff-cn);font-size:11px;font-weight:700;letter-spacing:.04em;color:#A8B7D4;text-rendering:optimizeLegibility}
+.adm-nav .it{display:flex;align-items:center;gap:9px;padding:9px 12px;border-radius:6px;font-size:13.5px;font-weight:600;color:#D2DCF0;line-height:1.35;cursor:pointer;transition:.15s;margin-bottom:3px;text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased}
+.adm-nav .it:hover{color:#F4F8FF;background:rgba(255,255,255,.045)}
+.adm-nav .it.cur{color:#67E8F9;font-weight:700;background:linear-gradient(90deg,rgba(34,211,238,.16),transparent);border-left:2px solid var(--sx-cyan)}
+.adm-nav .it svg{width:15px;height:15px;opacity:.9}
+.adm-nav .it .cnt{margin-left:auto;font-family:var(--ff-mono);font-size:10.5px;color:#8290AA;font-weight:600}
+/* 右侧内容区 */
+.adm-content{flex:1;padding:34px 44px;overflow:auto}
+.adm-content .ttl{margin:0 0 4px;font-family:var(--ff-display);font-size:22px;font-weight:700;letter-spacing:.03em}
+.adm-content .sub{margin:0 0 26px;font-size:13px;color:var(--sx-dim)}
+.adm-content .sec{margin-bottom:30px}
+.adm-content .sec h3{margin:0 0 14px;font-family:var(--ff-display);font-size:13px;font-weight:700;letter-spacing:.05em;color:var(--sx-cyan)}
+/* 内容区内的面板/表格：更宽松、一屏可见 */
+.adm-content .panel{background:var(--sx-card);border:1px solid var(--sx-line);border-radius:6px;padding:22px 24px;margin-bottom:16px}
+.adm-content table{width:100%;border-collapse:collapse;font-size:12.5px}
+.adm-content table th{font-family:var(--ff-mono);font-size:10px;color:var(--sx-faint);text-align:left;font-weight:500;
+  padding:10px 12px;border-bottom:1px solid var(--sx-line-2);text-transform:uppercase;letter-spacing:.06em}
+.adm-content table td{padding:12px;border-bottom:1px solid var(--sx-line);color:var(--sx-text)}
+.adm-content table tr:last-child td{border-bottom:0}
+.adm-content table tr:hover td{background:rgba(34,211,238,.04)}
+.adm-content .cardgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:16px}
+.adm-content .cgcard{background:var(--sx-card);border:1px solid var(--sx-line);border-radius:6px;padding:20px;transition:.18s}
+.adm-content .cgcard:hover{border-color:rgba(34,211,238,.35)}
+.adm-content .cgcard .nm{font-size:14px;font-weight:600;color:var(--sx-text);margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.adm-content .cgcard .stat{display:flex;justify-content:space-between;font-size:12px;color:var(--sx-dim);padding:6px 0;border-bottom:1px solid var(--sx-line)}
+.adm-content .cgcard .stat:last-child{border-bottom:0}
+
+/* 文档预览（P05 保留） */
+.doc{position:absolute;top:54px;left:0;right:0;bottom:0;display:flex;overflow:hidden}
+.doc .toc{width:220px;flex:none;border-right:1px solid var(--sx-line);padding:18px 16px;overflow:auto;background:rgba(8,13,26,.4)}
+.doc .toc h4{margin:0 0 10px;font-family:var(--ff-display);font-size:11px;letter-spacing:.1em;color:var(--sx-cyan);text-transform:uppercase}
+.doc .toc .tg{display:block;padding:5px 9px;font-size:12px;color:var(--sx-dim);border-radius:3px;cursor:default}
+.doc .toc .tg.cur{color:var(--sx-cyan);background:rgba(34,211,238,.08);font-weight:600}
+.doc .content{flex:1;padding:30px 50px;overflow:auto;line-height:1.9;font-size:13.5px}
+.doc .content h1{margin:0 0 14px;font-family:var(--ff-display);font-size:22px;letter-spacing:.02em}
+.doc .content h2{margin:24px 0 10px;font-size:16px;color:var(--sx-cyan);font-family:var(--ff-display);letter-spacing:.03em}
+.doc .content p{color:var(--sx-text)}
+.doc .content code{font-family:var(--ff-mono);font-size:12px;color:var(--sx-sky);background:rgba(56,189,248,.1);padding:1px 6px;border-radius:3px}
+.doc .content pre{background:rgba(7,12,26,.85);border:1px solid var(--sx-line);border-radius:4px;padding:14px;
+  font-family:var(--ff-mono);font-size:11.5px;line-height:1.7;color:var(--sx-text);overflow:auto}
+
+/* 404 */
+.pg-404{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:18px;padding:30px}
+.pg-404 .big{font-family:var(--ff-display);font-weight:900;font-size:180px;line-height:1;
+  background-image:var(--sx-grad);-webkit-background-clip:text;background-clip:text;
+  -webkit-text-fill-color:transparent;color:transparent;letter-spacing:-.02em}
+.pg-404 .msg{font-size:15px;color:var(--sx-dim);max-width:440px}
+.pg-404 .crumbs{font-family:var(--ff-mono);font-size:11px;color:var(--sx-faint);letter-spacing:.04em}
+
+/* 意图树 */
+.tree{position:absolute;top:54px;left:0;right:0;bottom:0;display:flex;overflow:auto;padding:20px 24px;gap:14px;align-items:flex-start}
+.tnode{background:var(--sx-card);border:1px solid var(--sx-line);border-radius:5px;padding:10px 12px;min-width:170px;
+  position:relative;clip-path:polygon(7px 0,100% 0,100% calc(100% - 7px),calc(100% - 7px) 100%,0 100%,0 7px)}
+.tnode .ttl{font-size:12px;font-weight:600;color:var(--sx-text)}
+.tnode .meta{font-family:var(--ff-mono);font-size:10px;color:var(--sx-faint);margin-top:4px}
+.tnode.root{background:linear-gradient(135deg,rgba(34,211,238,.18),rgba(124,58,237,.18));border-color:rgba(34,211,238,.4)}
+.tnode.cur{border-color:var(--sx-cyan);box-shadow:0 0 0 1px rgba(34,211,238,.4)}
+
+/* 关键词映射 */
+.kmap{position:absolute;top:54px;left:0;right:0;bottom:0;display:flex;overflow:hidden}
+.kmap .l{width:240px;border-right:1px solid var(--sx-line);padding:16px;overflow:auto}
+.kmap .l .grp{margin-bottom:14px}
+.kmap .l .grp h4{margin:0 0 6px;font-family:var(--ff-display);font-size:11px;letter-spacing:.06em;color:var(--sx-cyan);text-transform:uppercase}
+.kmap .l .kw{display:inline-block;font-family:var(--ff-mono);font-size:11px;padding:3px 9px;border-radius:3px;
+  background:rgba(34,211,238,.08);border:1px solid rgba(34,211,238,.25);color:var(--sx-cyan);margin:2px;cursor:default}
+.kmap .r{flex:1;padding:24px;overflow:auto}
+.kmap .r h3{margin:0 0 10px;font-family:var(--ff-display);font-size:14px;letter-spacing:.03em}
+.kmap .r .row{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:3px;font-size:12.5px}
+.kmap .r .row:nth-child(odd){background:rgba(255,255,255,.02)}
+
+/* 数据通道 */
+.flow{position:absolute;top:54px;left:0;right:0;bottom:0;display:flex;overflow:auto;padding:22px;gap:18px;align-items:flex-start}
+.fcol{display:flex;flex-direction:column;gap:10px;min-width:160px}
+.fcol h5{margin:0 0 4px;font-family:var(--ff-display);font-size:11px;letter-spacing:.06em;color:var(--sx-cyan);text-transform:uppercase}
+.fbox{background:var(--sx-card);border:1px solid var(--sx-line);border-radius:5px;padding:10px 12px;font-size:12px}
+.fbox.c_in{border-left:3px solid var(--sx-cyan)}
+.fbox.c_proc{border-left:3px solid var(--sx-violet)}
+.fbox.c_out{border-left:3px solid #34D399}
+.fbox .nm{font-weight:600}
+.fbox .meta{font-family:var(--ff-mono);font-size:10px;color:var(--sx-faint);margin-top:2px}
+.farr{position:absolute;font-family:var(--ff-mono);font-size:14px;color:var(--sx-cyan);opacity:.5}
+
+/* 时间线（链路/审计） */
+.tline{position:absolute;top:54px;left:0;right:0;bottom:0;padding:24px 30px;overflow:auto}
+.tl-row{display:grid;grid-template-columns:90px 1fr 110px;gap:14px;align-items:center;
+  padding:9px 0;border-bottom:1px solid var(--sx-line);font-size:12.5px}
+.tl-row .t{font-family:var(--ff-mono);font-size:11px;color:var(--sx-faint)}
+.tl-row .msg{color:var(--sx-text)}
+.tl-row .who{font-family:var(--ff-mono);font-size:10.5px;color:var(--sx-dim);text-align:right}
+
+/* 案件调查 */
+.case{position:absolute;top:54px;left:0;right:0;bottom:0;display:flex;overflow:hidden}
+.case .l{width:200px;border-right:1px solid var(--sx-line);background:rgba(8,13,26,.4);overflow:auto}
+.case .l .i{padding:11px 14px;border-bottom:1px solid var(--sx-line);cursor:default}
+.case .l .i.cur{background:rgba(34,211,238,.08);border-left:3px solid var(--sx-cyan)}
+.case .l .i .id{font-family:var(--ff-mono);font-size:10px;color:var(--sx-faint)}
+.case .l .i .nm{font-size:12.5px;font-weight:600;color:var(--sx-text);margin:2px 0}
+.case .l .i .st{font-family:var(--ff-mono);font-size:9.5px}
+.case .r{flex:1;overflow:auto;padding:22px 28px}
+.case .r h2{margin:0 0 8px;font-family:var(--ff-display);font-size:18px;letter-spacing:.03em}
+.case .evs{display:flex;flex-direction:column;gap:8px}
+.case .ev{display:flex;gap:12px;padding:10px 14px;background:var(--sx-card);border:1px solid var(--sx-line);border-radius:4px;font-size:12.5px}
+.case .ev .tm{font-family:var(--ff-mono);font-size:10.5px;color:var(--sx-faint);min-width:96px}
+
+/* 链接追踪图 */
+.trace-graph{position:relative;flex:1;background:radial-gradient(ellipse 600px 400px at 50% 50%,rgba(34,211,238,.1),transparent 70%)}
+.trace-graph svg{position:absolute;inset:0;width:100%;height:100%}
+
+/* 提示 */
+.pg-empty{flex:1;display:flex;align-items:center;justify-content:center;
+  font-family:var(--ff-mono);font-size:13px;color:var(--sx-faint);letter-spacing:.04em}
+
+/* ==========================================================================
+   重叠冲突标记 —— 模块独立化后，仅当两模块矩形相交才标红
+   ========================================================================== */
+.ovl{outline:2px dashed #F87171 !important;outline-offset:-2px;
+  box-shadow:inset 0 0 0 1px rgba(248,113,113,.55),0 0 12px rgba(248,113,113,.35) !important}
+/* 报错式冲突标注：用真实 DOM，避免伪元素在缩放/overflow 下不可见 */
+.ovl-badge{position:absolute;z-index:120;top:2px;left:2px;
+  font-family:var(--ff-mono);font-size:18px;font-weight:800;line-height:1;color:#FFF1F2;background:#B91C1C;
+  border:1px solid #F87171;padding:5px 8px;border-radius:3px;pointer-events:none;white-space:nowrap;
+  box-shadow:0 0 10px rgba(248,113,113,.75);transform:scale(.5);transform-origin:0 0}
+.ovl-hit{position:absolute;z-index:115;background:rgba(248,113,113,.32);border:2px solid #F87171;
+  box-shadow:0 0 14px rgba(248,113,113,.75),inset 0 0 10px rgba(127,29,29,.55);pointer-events:none}
+.ovl-hit::after{content:"重叠区";position:absolute;left:3px;top:3px;font-family:var(--ff-mono);font-size:18px;font-weight:800;
+  color:#FFF1F2;background:#B91C1C;border:1px solid #F87171;padding:4px 7px;border-radius:2px;transform:scale(.5);transform-origin:0 0}
+.thumb .ovl-badge{font-size:38px;padding:7px 12px;transform:none;top:4px;left:4px}
+.thumb .ovl-hit::after{font-size:38px;padding:7px 12px;transform:none}
+/* 冲突汇总面板 */
+.ovl-panel{position:fixed;right:16px;bottom:16px;z-index:300;max-width:340px;
+  background:rgba(127,29,29,.92);backdrop-filter:blur(8px);border:1px solid #F87171;
+  border-radius:6px;padding:10px 12px;font-family:var(--ff-mono);font-size:10.5px;color:#FEE2E2;
+  box-shadow:0 12px 30px -10px rgba(0,0,0,.6)}
+.ovl-panel b{color:#FCA5A5}
+.ovl-panel .row{display:flex;justify-content:space-between;gap:10px;padding:3px 0;
+  border-bottom:1px solid rgba(248,113,113,.2)}
+.ovl-panel .row:last-child{border-bottom:0}
+.ovl-panel .x{position:absolute;top:4px;right:6px;cursor:pointer;color:#FCA5A5;font-weight:700}
+.ovl-clear{background:transparent;border:1px solid rgba(248,113,113,.5);color:#FECACA;border-radius:3px;
+  font-family:var(--ff-mono);font-size:9.5px;padding:3px 8px;cursor:pointer;margin-top:6px}
+</style>
+</head>
+<body>
+
+<!-- ======================= HUD ======================= -->
+<div class="hud">
+  <div class="logo"><span class="dot"></span><h1>Sentinel Pages Overview</h1></div>
+  <span class="sub">界面总览 · 23 屏 · 1280×800 设计稿</span>
+  <span class="spacer"></span>
+  <button class="btn" id="btnC">只看 C 端</button>
+  <button class="btn" id="btnA">只看后台</button>
+  <button class="btn" id="btnTop">回到顶部</button>
+</div>
+
+<!-- ======================= TABS ======================= -->
+<div class="tabs" id="tabs">
+  <button data-tab="all" class="cur">全部 <span class="cnt">23</span></button>
+  <button data-tab="c">C 端 <span class="cnt" id="cCnt">6</span></button>
+  <button data-tab="a">后台 <span class="cnt" id="aCnt">17</span></button>
+</div>
+
+<main>
+  <div class="g" id="grid"></div>
+</main>
+
+<!-- ======================= MODAL ======================= -->
+<div class="modal" id="modal">
+  <div class="box">
+    <div class="hd">
+      <div class="nm"><span class="pid" id="mPid">—</span><h2 id="mTtl">—</h2></div>
+      <span class="meta" id="mMeta">—</span>
+      <div class="cf">
+        <button class="cfbtn" id="mCfBtn">冲突 0</button>
+        <div class="cflist hide" id="mCfList"></div>
+      </div>
+      <button class="x" id="mClose">关闭 ×</button>
+    </div>
+    <div class="cvwrap" id="mCvWrap">
+      <div class="cv" id="mCv"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+/* ==========================================================================
+   ICONS（与 design-workbench 完全一致；其中 Hex 用于侧栏品牌区）
+   pad 单位 = SVG 内部左留白 / 64，JS 自动计算 margin-left 抵消
+   ========================================================================== */
+function grad(u){return '<linearGradient id="g'+u+'" x1="0" y1="0" x2="1" y2="1">'+
+  '<stop offset="0" stop-color="#22D3EE"/><stop offset=".48" stop-color="#3B82F6"/>'+
+  '<stop offset="1" stop-color="#7C3AED"/></linearGradient>'}
+
+var HEX_SVG='<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" class="mk-anim">'+
+  '<defs>'+grad('h0')+'<clipPath id="cph0"><path d="M32 7 L53 19 V41 L32 53 L11 41 V19 Z"/></clipPath></defs>'+
+  '<g class="mk-float">'+
+  '<path d="M32 7 L53 19 V41 L32 53 L11 41 V19 Z" fill="url(#g0)"/>'+
+  '<path d="M32 7 L53 19 V26 L32 38 L11 26 V19 Z" fill="#fff" opacity=".12"/>'+
+  '<g clip-path="url(#cph0)"><rect class="mk-scan" x="8" y="12" width="48" height="2.4" fill="#E0F7FA" opacity=".95"/></g>'+
+  '<path d="M32 7 L53 19 V41 L32 53 L11 41 V19 Z" fill="none" stroke="#fff" stroke-opacity=".28" stroke-width="1.6"/>'+
+  '<path class="mk-trace" d="M20 30 L26 30 L29 25 L35 35 L38 30 L44 30" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>'+
+  '</g></svg>';
+var ICON_PAD=0.172; /* Hex Shield 的可见图形左留白 */
+var MARK_SIZE=40;
+var OPT_NUDGE=12;
+var markOffset = -(MARK_SIZE * ICON_PAD) + OPT_NUDGE; /* ≈ +5.12px */
+
+/* 侧栏图标（行内 16×16） */
+var NAV_ICONS={
+  plus:'<path d="M12 5v14M5 12h14"/>',
+  hist:'<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  back:'<path d="M19 12H5 M11 6l-6 6 6 6"/>',
+  db:'<ellipse cx="12" cy="6" rx="7.5" ry="2.8"/><path d="M4.5 6v12c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8V6"/><path d="M4.5 12c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8"/>',
+  gear:'<circle cx="12" cy="12" r="3"/><path d="M12 2.5v2.6M12 18.9v2.6M2.5 12h2.6M18.9 12h2.6M5.3 5.3l1.9 1.9M16.8 16.8l1.9 1.9M18.7 5.3l-1.9 1.9M7.2 16.8l-1.9 1.9"/>',
+  shield:'<path d="M12 2 L20 5 V12 C20 16 17 19 12 22 C7 19 4 16 4 12 V5 Z"/>',
+  brain:'<path d="M8 8 C6 8 5 9 5 11 C5 12 5 13 6 13 C5 14 6 16 8 16 V19 H10 V16 C11 16 12 15 12 13 C13 13 14 12 14 11 C14 9 13 8 11 8 Z"/>',
+  doc:'<path d="M6 3 H14 L18 7 V21 H6 Z"/><path d="M14 3 V7 H18"/><path d="M8 11 H16 M8 14 H16 M8 17 H13"/>',
+  layers:'<path d="M12 2 L22 7 L12 12 L2 7 Z"/><path d="M2 12 L12 17 L22 12"/><path d="M2 17 L12 22 L22 17"/>',
+  tree:'<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M6 8.5 V15.5 M6 12 H15.5"/>',
+  flow:'<rect x="3" y="9" width="6" height="6" rx="1"/><rect x="15" y="9" width="6" height="6" rx="1"/><path d="M9 12 H15"/>',
+  tag:'<path d="M3 12 L12 3 H20 V11 L11 20 Z"/><circle cx="16" cy="8" r="1.3"/>',
+  link:'<path d="M9 9 H7 A3 3 0 0 0 7 15 H9 M15 9 H17 A3 3 0 0 1 17 15 H15 M9 12 H15"/>',
+  scroll:'<path d="M5 4 H17 V20 L14 17 L11 20 L8 17 L5 20 Z"/><path d="M8 9 H14 M8 12 H14 M8 15 H12"/>',
+  warn:'<path d="M12 3 L22 20 H2 Z"/><path d="M12 10 V14 M12 17 V17.1"/>',
+  case:'<path d="M5 8 H19 V20 H5 Z"/><path d="M9 8 V5 H15 V8"/>',
+  users:'<circle cx="9" cy="9" r="3"/><circle cx="17" cy="10" r="2"/><path d="M3 19 C3 15 6 13 9 13 S15 15 15 19 M14 19 C14 16 16 15 17 15 S21 16 21 19"/>',
+  bulb:'<path d="M9 18 H15 M10 21 H14"/><path d="M7 11 C7 7 9 5 12 5 S17 7 17 11 C17 13 16 14 15 15 V17 H9 V15 C8 14 7 13 7 11 Z"/>',
+  cog:'<circle cx="12" cy="12" r="3.5"/><path d="M12 3 V6 M12 18 V21 M3 12 H6 M18 12 H21 M5.6 5.6 L7.7 7.7 M16.3 16.3 L18.4 18.4 M5.6 18.4 L7.7 16.3 M16.3 7.7 L18.4 5.6"/>',
+  copy:'<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M4 16 V6 A2 2 0 0 1 6 4 H16"/>',
+  edit:'<path d="M4 20 H20 M4 17 L15 6 L18 9 L7 20 Z"/>',
+  thumbsup:'<path d="M14 9 V4 C14 3 13 2 12 2 L7 10 V21 H16 C17 21 18 20 18 19 L19 12 C19 11 18 10 17 10 H14 M7 10 H4 V21 H7"/>',
+  thumbsdown:'<path d="M14 15 V20 C14 21 13 22 12 22 L7 14 V3 H16 C17 3 18 4 18 5 L19 12 C19 13 18 14 17 14 H14 M7 14 H4 V3 H7"/>',
+  retry:'<path d="M3 12 A9 9 0 1 0 7 5.5 L10 3 V9 H4"/>',
+  bell:'<path d="M18 8 A6 6 0 0 0 6 8 C6 13 4 15 4 16 H20 C20 15 18 13 18 8 Z"/><path d="M10 20 A2 2 0 0 0 14 20"/>'
+};
+function nIc(k){return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" '+
+  'stroke-linecap="round" stroke-linejoin="round">'+NAV_ICONS[k]+'</svg>'}
+
+/* ==========================================================================
+   侧栏组件 —— cSide({activeId, withHistory, admin})
+     activeId = 当前页 ID（决定哪一项高亮 + 历史会话高亮）
+     withHistory = C 端是否显示「历史会话」子项（后台默认显示）
+     admin = true 则后台侧栏（多一组「管理」）
+     返回侧栏完整 HTML
+   ========================================================================== */
+function cSide(o){
+  o = o || {};
+  var groups = [];
+
+  /* C 端（非 admin）：显示对话相关导航 */
+  if(!o.admin){
+    groups.push({g:'工作区', items:[{i:'plus', t:'新建对话', id:'new', act: o.activeId==='P02'}]});
+    groups.push({g:'资源', items:[{i:'db', t:'知识库', id:'kb'}]});
+    groups.push({g:'系统', items:[{i:'gear', t:'后台管理', id:'admin', navto:'A00'}]});
+    groups.push({g:'会话', items:[{i:'hist', t:'历史会话', id:'hist'}], subs:[
+      {t:'部署问题咨询', dd:'14:32', id:'h1', act:o.activeId==='P03'},
+      {t:'数据库连接配置', dd:'昨天', id:'h2'},
+      {t:'案件流程梳理', dd:'8/22', id:'h3'},
+      {t:'意图识别准确率', dd:'8/19', id:'h4'}
+    ]});
+  }
+
+  if(o.admin){
+    groups.push({g:'导航', items:[
+      {i:'back', t:'返回对话', id:'back', navto:'P03'}
+    ]});
+    groups.push({g:'管理', items:[
+      {i:'shield', t:'Dashboard', id:'A00', act:o.activeId==='A00'},
+      {i:'brain', t:'智能体管理', id:'A01', act:o.activeId==='A01'},
+      {i:'bulb', t:'提示词配置', id:'A02', act:o.activeId==='A02'},
+      {i:'doc', t:'知识库管理', id:'A03', act:o.activeId==='A03'},
+      {i:'layers', t:'分块管理', id:'A05', act:o.activeId==='A05'},
+      {i:'tree', t:'知识图谱', id:'A06', act:o.activeId==='A06'},
+      {i:'flow', t:'意图树配置', id:'A07', act:o.activeId==='A07'},
+      {i:'tag', t:'意图列表', id:'A08', act:o.activeId==='A08'},
+      {i:'link', t:'关键词映射', id:'A10', act:o.activeId==='A10'},
+      {i:'warn', t:'数据通道', id:'A09', act:o.activeId==='A09'},
+      {i:'scroll', t:'链路追踪', id:'A11', act:o.activeId==='A11'},
+      {i:'warn', t:'审计日志', id:'A12', act:o.activeId==='A12'},
+      {i:'case', t:'案件调查', id:'A13', act:o.activeId==='A13'},
+      {i:'users', t:'用户管理', id:'A14', act:o.activeId==='A14'},
+      {i:'bulb', t:'示例问题', id:'A15', act:o.activeId==='A15'},
+      {i:'cog', t:'系统设置', id:'A16', act:o.activeId==='A16'}
+    ]});
+  }
+
+  var html = '<aside class="sc-side" data-box="0,0,280,800" data-mod="侧栏">'+
+    '<div class="bar" data-box="12,12,256,52">'+
+      '<div class="mk" style="margin-left:'+markOffset.toFixed(2)+'px">'+HEX_SVG+'</div>'+
+      '<div class="txtbox"><div class="wm"><span class="tx">sentinel</span></div></div>'+
+    '</div>'+
+    '<div class="nav ns-notch" data-box="76,12,256,668">';
+  groups.forEach(function(gr){
+    html += '<div class="navgroup">'+gr.g+'</div>';
+    gr.items.forEach(function(it){
+      var navAttr = it.navto ? ' data-navto="'+it.navto+'"' : '';
+      html += '<div class="navitem'+(it.act?' act':'')+'" data-id="'+it.id+'"'+navAttr+'>'+
+              nIc(it.i)+'<span>'+it.t+'</span></div>';
+    });
+    if(gr.subs){
+      gr.subs.forEach(function(s){
+        html += '<div class="subitem'+(s.act?' act':'')+'" data-id="'+s.id+'">'+
+                '<span>'+s.t+'</span><span class="dd">'+s.dd+'</span></div>';
+      });
+    }
+  });
+  html += '</div>'+
+    '<div class="acct" data-id="A14" data-mod="账户入口">'+
+      '<div class="avt">A</div>'+
+      '<div><div class="nm">admin</div><div class="role">超级管理员 · 在线</div></div>'+
+    '</div>'+
+    '</aside>';
+  return html;
+}
+
+/* ==========================================================================
+   通用顶部 + 帮助函数
+   ========================================================================== */
+function topBar(crumbs){
+  return '<div class="pg-top" data-mod="顶栏">'+
+    '<div class="crumb">'+crumbs+'</div>'+
+    '<div class="r">'+
+      '<div class="bell"><span class="dot"></span>'+
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8 A6 6 0 0 0 6 8 C6 13 4 15 4 16 H20 C20 15 18 13 18 8 Z"/><path d="M10 20 A2 2 0 0 0 14 20"/></svg>'+
+      '</div>'+
+      '<div class="search">'+
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20 L16 16"/></svg>'+
+        '<input placeholder="全局搜索…" /></div>'+
+    '</div></div>';
+}
+
+/* ==========================================================================
+   adm() —— P05 风格后台分栏框架
+   左导航栏（分类）+ 右内容区。用法：
+     adm([{g:'分类', items:[{t:'名称', i:'icon', cur:true, n:'12'}]}], 内容HTML)
+   ========================================================================== */
+function adm(groups, content){
+  var nav = '<nav class="adm-nav" data-mod="导航栏">';
+  groups.forEach(function(gr){
+    nav += '<div class="grp"><h4>'+gr.g+'</h4>';
+    gr.items.forEach(function(it){
+      nav += '<div class="it'+(it.cur?' cur':'')+'">'+nIc(it.i)+'<span>'+it.t+'</span>'+
+        (it.n?'<span class="cnt">'+it.n+'</span>':'')+'</div>';
+    });
+    nav += '</div>';
+  });
+  nav += '</nav>';
+  return '<div class="adm">'+nav+
+    '<span class="adm-resizer" aria-label="调整导航栏宽度"></span>'+
+    '<div class="adm-content" data-mod="内容区">'+content+'</div></div>';
+}
+
+/* ==========================================================================
+   页面 render 函数
+   全部以同样结构返回：cSide({...}) + main 区 + 中间内容
+   返回的字符串直接 innerHTML 到 1280×800 容器里
+   ========================================================================== */
+
+/* ===== C 端 P01-P06 ===== */
+
+/* P01 登录 —— 全屏居中卡片账号密码（无侧栏） */
+function P01(){
+  return '<div class="sc-main no-topbar" style="left:0;width:100%" data-mod="登录页">'+
+      '<div class="pg-mid"><div class="pg-login">'+
+      '<div class="card" data-mod="登录卡">'+
+        '<h3>登录后台</h3>'+
+        '<p class="lead">使用您的账号继续访问 sentinel</p>'+
+        '<label>账号</label><input value="admin" />'+
+        '<label>密码</label><input type="password" value="••••••" />'+
+        '<button class="submit">登 录</button>'+
+        '<div class="hint">没有账号？<a>联系管理员</a></div>'+
+      '</div></div></div>'+
+    '</div>';
+}
+
+/* P02 欢迎 —— Hero Fredoka × Squash + 直接对话框（无开始对话按钮） */
+function P02(){
+  var ch = '';
+  var w = 'Sentinel';
+  for(var i=0;i<w.length;i++) ch+='<span class="ch" style="--i:'+i+'"><span class="ch-txt">'+w[i]+'</span><span class="ch-sh"></span></span>';
+  return cSide({activeId:'P02'})+
+    '<div class="sc-main">'+
+      topBar('<i>欢迎</i> · <em>今天能帮你做什么</em>')+
+      '<div class="pg-mid"><div class="pg-hero" data-mod="对话区·欢迎">'+
+        '<div class="wmc b-squash">'+ch+'</div>'+
+        '<p class="lead">基于知识库与意图识别的智能体 · 支持对话、检索、案件调查</p>'+
+      '</div>'+
+      '<div class="pg-input" data-mod="对话区·输入"><div class="box"><input placeholder="输入你的问题…" />'+
+        '<div class="send">SEND</div></div></div>'+
+    '</div>';
+}
+
+/* P03 对话 —— 会话流 + 用户右对齐气泡 + 复制/编辑（hover）+ 助手 复制/好评/差评/重来 */
+function P03(){
+  return cSide({activeId:'P03'})+
+    '<div class="sc-main">'+
+      topBar('<i>对话</i> · <em>部署问题咨询</em>')+
+      '<div class="pg-mid">'+
+        '<div class="pg-conv" data-mod="对话区·消息">'+
+          /* 用户消息：右侧整行 + 复制/编辑（hover） */
+          '<div class="b me">'+
+            '<div class="body">'+
+              '<div class="who">你</div>'+
+              '<div class="txt">帮我总结一下部署步骤</div>'+
+              '<div class="act">'+
+                '<div class="v-btn" title="复制">'+nIc('copy')+'</div>'+
+                '<div class="v-btn" title="编辑">'+nIc('edit')+'</div>'+
+              '</div>'+
+            '</div>'+
+          '</div>'+
+          /* 助手消息：头像在左 + 宽整行 + 复制/好评/差评/重来 */
+          '<div class="b ai">'+
+            '<div class="avt"></div>'+
+            '<div class="body">'+
+              '<div class="who">sentinel</div>'+
+              '<div class="txt">部署分为三步：<br/>'+
+                '① 配置环境变量（<code>.env</code>）；<br/>'+
+                '② 初始化 PostgreSQL（执行 upgrades/*.sql）；<br/>'+
+                '③ 启动 backend-java + agent-python。</div>'+
+              '<div class="act">'+
+                '<div class="v-btn" title="复制">'+nIc('copy')+'</div>'+
+                '<div class="v-btn" title="有帮助">'+nIc('thumbsup')+'</div>'+
+                '<div class="v-btn" title="没帮助">'+nIc('thumbsdown')+'</div>'+
+                '<div class="v-btn" title="重新生成">'+nIc('retry')+'</div>'+
+              '</div>'+
+            '</div>'+
+          '</div>'+
+        '</div>'+
+        '<div class="pg-input" data-mod="对话区·输入"><div class="box"><input placeholder="输入你的问题…" />'+
+          '<div class="send">SEND</div></div></div>'+
+      '</div>'+
+    '</div>';
+}
+
+/* P04 更新日志 —— 时间倒序变更列表 */
+function P04(){
+  return cSide({activeId:'P04'})+
+    '<div class="sc-main">'+
+      topBar('<i>更新日志</i> · <em>CHANGELOG</em>')+
+      '<div class="pg-body">'+
+      '<div class="pg-hd"><h1>更新日志</h1><span class="sub">从最新到最早</span></div>'+
+      '<div class="chn"><span class="v">v1.1.0-rc1</span><span class="d">2026-08-29</span>'+
+        '<ul><li><b>新增</b>：案件调查 / 意图树配置 / 数据通道</li>'+
+        '<li><b>优化</b>：知识图谱渲染性能</li>'+
+        '<li><i>fix</i>：长会话上下文截断</li></ul></div>'+
+      '<div class="chn"><span class="v">v1.0.3</span><span class="d">2026-08-12</span>'+
+        '<ul><li><b>新增</b>：审计日志</li><li><i>fix</i>：侧栏收起动画</li></ul></div>'+
+      '<div class="chn"><span class="v">v1.0.0</span><span class="d">2026-07-20</span>'+
+        '<ul><li><b>首发</b>：基础对话 / 知识库 / RAG</li></ul></div>'+
+    '</div></div>';
+}
+
+/* P05 文档预览 —— 左目录右内容 */
+function P05(){
+  return cSide({activeId:'P05'})+
+    '<div class="sc-main">'+
+      topBar('<i>文档预览</i> · <em>部署指南</em>')+
+      '<div class="doc">'+
+        '<div class="toc">'+
+          '<h4>部署</h4>'+
+          '<div class="tg cur">环境准备</div>'+
+          '<div class="tg">Java 17 安装</div>'+
+          '<div class="tg">数据库初始化</div>'+
+          '<div class="tg">启动服务</div>'+
+          '<h4>进阶</h4>'+
+          '<div class="tg">集群部署</div>'+
+          '<div class="tg">监控告警</div>'+
+        '</div>'+
+        '<div class="content">'+
+          '<h1>部署指南</h1>'+
+          '<p>本指南介绍如何在生产环境部署 <code>sentinel</code>：</p>'+
+          '<h2>1. 环境准备</h2>'+
+          '<p>JDK 17、PostgreSQL 14+、Redis 6+。</p>'+
+          '<pre>mvn clean package -DskipTests\njava -jar target/sentinel.jar</pre>'+
+          '<h2>2. 数据库初始化</h2>'+
+          '<p>运行 <code>upgrades/v1.1.0/*.sql</code> 完成 schema 迁移。</p>'+
+        '</div>'+
+      '</div>'+
+    '</div>';
+}
+
+/* P06 404 —— 大字编号 + 返回 */
+function P06(){
+  return cSide({activeId:'P06'})+
+    '<div class="sc-main">'+
+      topBar('<i>错误</i> · <em>404 NOT FOUND</em>')+
+      '<div class="pg-mid"><div class="pg-404">'+
+        '<div class="big">404</div>'+
+        '<div class="msg">页面不存在或已被移动，请检查 URL 或返回主页继续工作。</div>'+
+        '<div class="crumbs">sentinel · / this-route</div>'+
+        '<div class="cta"><button class="pg-btn pri">回到主页</button>'+
+        '<button class="pg-btn ghost">联系管理员</button></div>'+
+      '</div></div>'+
+    '</div>';
+}
+
+/* ===== 后台 A00-A16 ===== */
+
+/* A00 Dashboard —— P05 分栏：左导航 + 右 KPI/趋势/列表 */
+function A00(){
+  var c='<div class="ttl">Dashboard</div><div class="sub">系统运行总览</div>'+
+    '<div class="kpi" style="grid-template-columns:repeat(4,1fr)">'+
+      '<div class="c"><div class="lbl">今日对话</div><div class="val">1,284</div><div class="delta">+12.4%</div></div>'+
+      '<div class="c"><div class="lbl">活跃用户</div><div class="val">342</div><div class="delta">+8.1%</div></div>'+
+      '<div class="c"><div class="lbl">意图命中</div><div class="val">93.7%</div><div class="delta">+0.6%</div></div>'+
+      '<div class="c"><div class="lbl">案件待办</div><div class="val">27</div><div class="delta dn">+3</div></div>'+
+    '</div>'+
+    '<div class="row2">'+
+      '<div class="panel"><h3>对话趋势 · 7 天</h3>'+
+        '<div class="chart">'+
+          '<svg viewBox="0 0 600 180">'+
+            '<defs><linearGradient id="ch0" x1="0" y1="0" x2="0" y2="1">'+
+              '<stop offset="0" stop-color="#22D3EE" stop-opacity=".5"/>'+
+              '<stop offset="1" stop-color="#22D3EE" stop-opacity="0"/>'+
+            '</linearGradient></defs>'+
+            '<path d="M0 140 L80 110 L160 120 L240 90 L320 70 L400 50 L480 60 L560 30 L600 40 L600 180 L0 180 Z" fill="url(#ch0)"/>'+
+            '<path d="M0 140 L80 110 L160 120 L240 90 L320 70 L400 50 L480 60 L560 30 L600 40" fill="none" stroke="#22D3EE" stroke-width="2"/>'+
+            '<g fill="#22D3EE"><circle cx="80" cy="110" r="3"/><circle cx="240" cy="90" r="3"/><circle cx="400" cy="50" r="3"/><circle cx="560" cy="30" r="3"/></g>'+
+          '</svg>'+
+          '<span class="ax" style="left:14px;bottom:6px">8/24</span>'+
+          '<span class="ax" style="right:14px;bottom:6px">8/30</span>'+
+        '</div>'+
+      '</div>'+
+      '<div class="panel"><h3>最近活动</h3>'+
+      '<table><tr><th>时间</th><th>用户</th><th>动作</th><th>状态</th></tr>'+
+      '<tr><td>14:32</td><td>admin</td><td>更新提示词</td><td><span class="tag ok">完成</span></td></tr>'+
+      '<tr><td>14:18</td><td>张明</td><td>新建案件</td><td><span class="tag cy">已分配</span></td></tr>'+
+      '<tr><td>13:50</td><td>李华</td><td>导入文档 12 篇</td><td><span class="tag ok">完成</span></td></tr>'+
+      '<tr><td>13:22</td><td>system</td><td>索引重建</td><td><span class="tag wn">执行中</span></td></tr>'+
+      '</table></div>'+
+    '</div>'+
+    '<div class="row2">'+
+      '<div class="panel"><h3>案件分布</h3>'+
+        '<div class="chart"><svg viewBox="0 0 300 180"><g transform="translate(150,90)">'+
+          '<circle r="64" fill="none" stroke="#1A2745" stroke-width="22"/>'+
+          '<circle r="64" fill="none" stroke="#22D3EE" stroke-width="22" stroke-dasharray="160 402" transform="rotate(-90)"/>'+
+          '<circle r="64" fill="none" stroke="#7C3AED" stroke-width="22" stroke-dasharray="120 402" stroke-dashoffset="-160" transform="rotate(-90)"/>'+
+          '<circle r="64" fill="none" stroke="#A855F7" stroke-width="22" stroke-dasharray="80 402" stroke-dashoffset="-280" transform="rotate(-90)"/>'+
+        '</g></svg></div>'+
+      '</div>'+
+      '<div class="panel"><h3>资源用量</h3>'+
+      '<table><tr><th>节点</th><th>CPU</th><th>内存</th><th>状态</th></tr>'+
+      '<tr><td>backend-01</td><td>34%</td><td>61%</td><td><span class="tag ok">健康</span></td></tr>'+
+      '<tr><td>backend-02</td><td>52%</td><td>72%</td><td><span class="tag ok">健康</span></td></tr>'+
+      '<tr><td>agent-01</td><td>78%</td><td>85%</td><td><span class="tag wn">高负载</span></td></tr>'+
+      '</table></div>'+
+    '</div>';
+  return cSide({activeId:'A00',admin:true})+
+    '<div class="sc-main">'+
+    topBar('<i>工作台</i> · <em>Dashboard</em>')+
+    adm([
+      {g:'概览', items:[{t:'运行总览', i:'shield', cur:true},{t:'案件分布', i:'case'},{t:'资源用量', i:'db'}]},
+      {g:'快捷', items:[{t:'导出报告', i:'doc'},{t:'刷新数据', i:'retry'}]}
+    ], c);
+}
+
+/* A01 智能体管理 —— 卡片列表 */
+function A01(){
+  var c='<div class="ttl">智能体管理</div><div class="sub">已配置 5 个智能体</div>'+
+    '<div class="sec"><h3>全部智能体</h3>'+
+    '<div class="lst-item"><div class="ic">'+nIc('brain')+'</div>'+
+      '<div><div class="nm">客服智能体</div><div class="dsc">基于 RAG 检索 · 知识库 = 公开文档</div></div>'+
+      '<div class="r"><span class="tag ok">运行中</span><button class="tbtn ghost">配置</button></div></div>'+
+    '<div class="lst-item"><div class="ic">'+nIc('shield')+'</div>'+
+      '<div><div class="nm">案件调查智能体</div><div class="dsc">意图树 + 链路追踪 · 高权限</div></div>'+
+      '<div class="r"><span class="tag ok">运行中</span><button class="tbtn ghost">配置</button></div></div>'+
+    '<div class="lst-item"><div class="ic">'+nIc('bulb')+'</div>'+
+      '<div><div class="nm">提示词生成</div><div class="dsc">专用工具型 · 单步调用</div></div>'+
+      '<div class="r"><span class="tag wn">测试中</span><button class="tbtn ghost">配置</button></div></div>'+
+    '<div class="lst-item"><div class="ic">'+nIc('doc')+'</div>'+
+      '<div><div class="nm">文档问答</div><div class="dsc">长文档摘要 · 引用回链</div></div>'+
+      '<div class="r"><span class="tag ok">运行中</span><button class="tbtn ghost">配置</button></div></div>'+
+    '<div class="lst-item"><div class="ic">'+nIc('case')+'</div>'+
+      '<div><div class="nm">审计助手</div><div class="dsc">只读 · 审计日志检索</div></div>'+
+      '<div class="r"><span class="tag bd">已停用</span><button class="tbtn ghost">配置</button></div></div>'+
+    '</div>';
+  return cSide({activeId:'A01',admin:true})+
+    '<div class="sc-main">'+
+    topBar('<i>管理</i> · <em>智能体管理</em>')+
+    adm([
+      {g:'概览', items:[{t:'全部智能体', i:'brain', cur:true, n:'5'}]},
+      {g:'状态', items:[{t:'运行中', i:'shield', n:'3'},{t:'测试中', i:'bulb', n:'1'},{t:'已停用', i:'cog', n:'1'}]},
+      {g:'操作', items:[{t:'导入', i:'doc'},{t:'新建', i:'plus'}]}
+    ], c);
+}
+
+/* A02 提示词配置 —— 左版本导航 + 右编辑器/变量 */
+function A02(){
+  var c='<div class="ttl">提示词配置</div><div class="sub">客服智能体 · v3</div>'+
+    '<div class="row23">'+
+      '<div class="panel"><h3>系统提示词</h3>'+
+        '<pre style="background:rgba(7,12,26,.85);border:1px solid var(--sx-line);border-radius:4px;padding:14px;'+
+        'font-family:var(--ff-mono);font-size:11.5px;line-height:1.7;color:var(--sx-text);margin:0;min-height:340px;white-space:pre-wrap">你是一名专业的客服助手，名叫 sentinel。'+
+'\n\n主要职责：'+
+'\n1. 解答用户的产品使用问题'+
+'\n2. 在不确定时主动询问背景信息'+
+'\n3. 引用相关文档给出准确回复'+
+'\n\n# 行为约束'+
+'\n- 不要编造事实，不要凭空承诺'+
+'\n- 涉及账户/订单请引导至工单系统'+
+'\n- 保持简洁、专业、有温度的语气</pre>'+
+      '</div>'+
+      '<div class="panel"><h3>可用变量</h3>'+
+      '<table><tr><th>名称</th><th>说明</th></tr>'+
+      '<tr><td><code>{{user_name}}</code></td><td>用户姓名</td></tr>'+
+      '<tr><td><code>{{context}}</code></td><td>RAG 检索片段</td></tr>'+
+      '<tr><td><code>{{history}}</code></td><td>历史对话</td></tr>'+
+      '<tr><td><code>{{date}}</code></td><td>当前日期</td></tr></table>'+
+      '</div>'+
+    '</div>';
+  return cSide({activeId:'A02',admin:true})+
+    '<div class="sc-main">'+
+    topBar('<i>管理</i> · <em>提示词配置</em>')+
+    adm([
+      {g:'版本', items:[{t:'v3 · 当前', i:'doc', cur:true},{t:'v2', i:'scroll'},{t:'v1', i:'scroll'}]},
+      {g:'操作', items:[{t:'历史版本', i:'hist'},{t:'保存', i:'edit'}]}
+    ], c);
+}
+
+/* A03 知识库管理 —— 卡片网格 */
+function A03(){
+  var c='<div class="ttl">知识库管理</div><div class="sub">4 个知识库 · 总计 1,248 篇文档 · 全部已嵌入</div>'+
+    '<div class="cardgrid">'+
+    '<div class="cgcard"><div class="nm"><span class="tag cy">产品</span>产品文档</div>'+
+      '<div class="stat"><span>文档</span><b>421</b></div>'+
+      '<div class="stat"><span>分块</span><b>3,890</b></div>'+
+      '<div class="stat"><span>更新</span><b>2 小时前</b></div></div>'+
+    '<div class="cgcard"><div class="nm"><span class="tag vi">案例</span>案例库</div>'+
+      '<div class="stat"><span>文档</span><b>236</b></div>'+
+      '<div class="stat"><span>分块</span><b>2,108</b></div>'+
+      '<div class="stat"><span>更新</span><b>昨天</b></div></div>'+
+    '<div class="cgcard"><div class="nm"><span class="tag ok">法规</span>法规手册</div>'+
+      '<div class="stat"><span>文档</span><b>52</b></div>'+
+      '<div class="stat"><span>分块</span><b>687</b></div>'+
+      '<div class="stat"><span>更新</span><b>8/12</b></div></div>'+
+    '<div class="cgcard"><div class="nm"><span class="tag wn">草稿</span>待处理</div>'+
+      '<div class="stat"><span>待嵌入</span><b>3</b></div>'+
+      '<div class="stat"><span>同步失败</span><b>1</b></div>'+
+      '<div class="stat"><span>更新</span><b>8/20</b></div></div>'+
+    '</div>';
+  return cSide({activeId:'A03',admin:true})+
+    '<div class="sc-main">'+
+    topBar('<i>资源</i> · <em>知识库管理</em>')+
+    adm([
+      {g:'知识库', items:[{t:'全部知识库', i:'db', cur:true, n:'4'}]},
+      {g:'分类', items:[{t:'产品文档', i:'doc', n:'421'},{t:'案例库', i:'case', n:'236'},{t:'法规手册', i:'shield', n:'52'}]},
+      {g:'操作', items:[{t:'同步', i:'retry'},{t:'新建', i:'plus'}]}
+    ], c);
+}
+
+/* A04 文档管理 —— 表格 */
+function A04(){
+  var c='<div class="ttl">文档管理</div><div class="sub">1,248 篇 · 跨 4 个知识库</div>'+
+    '<div class="panel"><table>'+
+      '<tr><th>名称</th><th>知识库</th><th>大小</th><th>分块</th><th>更新</th><th>操作</th></tr>'+
+      '<tr><td>部署指南 v1.1.pdf</td><td><span class="tag cy">产品</span></td><td>2.4 MB</td><td>48</td><td>14:32</td><td><button class="tbtn ghost">…</button></td></tr>'+
+      '<tr><td>客服 FAQ.md</td><td><span class="tag cy">产品</span></td><td>128 KB</td><td>22</td><td>昨天</td><td><button class="tbtn ghost">…</button></td></tr>'+
+      '<tr><td>案例 · 张三案.docx</td><td><span class="tag vi">案例</span></td><td>4.8 MB</td><td>96</td><td>8/22</td><td><button class="tbtn ghost">…</button></td></tr>'+
+      '<tr><td>网络安全法.pdf</td><td><span class="tag ok">法规</span></td><td>1.1 MB</td><td>31</td><td>8/12</td><td><button class="tbtn ghost">…</button></td></tr>'+
+      '<tr><td>API 规范 v2.md</td><td><span class="tag cy">产品</span></td><td>74 KB</td><td>14</td><td>8/05</td><td><button class="tbtn ghost">…</button></td></tr>'+
+      '<tr><td>索引说明.md</td><td><span class="tag cy">产品</span></td><td>22 KB</td><td>6</td><td>7/30</td><td><button class="tbtn ghost">…</button></td></tr>'+
+      '</table></div>';
+  return cSide({activeId:'A04',admin:true})+
+    '<div class="sc-main">'+
+    topBar('<i>资源</i> · <em>文档管理</em>')+
+    adm([
+      {g:'知识库', items:[{t:'全部文档', i:'doc', cur:true, n:'1248'},{t:'产品文档', i:'db', n:'421'},{t:'案例库', i:'case', n:'236'},{t:'法规手册', i:'shield', n:'52'}]},
+      {g:'操作', items:[{t:'导出', i:'doc'},{t:'上传文档', i:'plus'}]}
+    ], c);
+}
+
+/* A05 分块管理 —— 左文档章节 + 右分块表格 */
+function A05(){
+  var c='<div class="ttl">分块管理</div><div class="sub">部署指南 v1.1.pdf · 48 / 48</div>'+
+    '<div class="panel"><table>'+
+      '<tr><th>#</th><th>起始位置</th><th>字符数</th><th>命中</th><th>预览</th></tr>'+
+      '<tr><td>01</td><td>第 1 章</td><td>412</td><td><span class="tag ok">38</span></td><td>sentinel 是一个基于 RAG 与意图识别的…</td></tr>'+
+      '<tr><td>02</td><td>第 1.2 节</td><td>286</td><td><span class="tag ok">21</span></td><td>系统由 backend-java 与 agent-python 组成…</td></tr>'+
+      '<tr><td>03</td><td>第 2 章</td><td>624</td><td><span class="tag cy">52</span></td><td>部署需要 JDK 17、PostgreSQL 14+、Redis 6+…</td></tr>'+
+      '<tr><td>04</td><td>第 3 章</td><td>358</td><td><span class="tag wn">14</span></td><td>运行 mvn clean package -DskipTests 构建…</td></tr>'+
+      '<tr><td>05</td><td>第 4 章</td><td>512</td><td><span class="tag cy">43</span></td><td>初始化数据库脚本位于 upgrades/v1.1.0 下…</td></tr>'+
+      '<tr><td>06</td><td>第 5 章</td><td>298</td><td><span class="tag wn">9</span></td><td>启动脚本支持多种运行模式…</td></tr>'+
+      '</table></div>';
+  return cSide({activeId:'A05',admin:true})+
+    '<div class="sc-main">'+
+    topBar('<i>资源</i> · <em>分块管理</em>')+
+    adm([
+      {g:'文档', items:[{t:'部署指南', i:'doc', cur:true, n:'48'},{t:'客服 FAQ', i:'doc', n:'22'},{t:'案例·张三案', i:'case', n:'96'}]},
+      {g:'操作', items:[{t:'重新切分', i:'retry'},{t:'导出', i:'doc'}]}
+    ], c);
+}
+
+/* A06 知识图谱 —— 左图谱分类 + 右可视化 */
+function A06(){
+  var c='<div class="ttl">知识图谱</div><div class="sub">客服 FAQ · 节点 421 / 边 1,028</div>'+
+    '<div class="graph" style="height:600px">'+
+      '<svg viewBox="0 0 1000 640" preserveAspectRatio="xMidYMid meet">'+
+        '<g stroke="rgba(34,211,238,.18)" stroke-width="1">'+
+          '<line x1="500" y1="320" x2="220" y2="180"/>'+
+          '<line x1="500" y1="320" x2="780" y2="160"/>'+
+          '<line x1="500" y1="320" x2="180" y2="470"/>'+
+          '<line x1="500" y1="320" x2="820" y2="490"/>'+
+          '<line x1="220" y1="180" x2="120" y2="70"/>'+
+          '<line x1="220" y1="180" x2="340" y2="90"/>'+
+          '<line x1="780" y1="160" x2="700" y2="50"/>'+
+          '<line x1="180" y1="470" x2="80" y2="590"/>'+
+          '<line x1="180" y1="470" x2="320" y2="590"/>'+
+          '<line x1="820" y1="490" x2="900" y2="590"/>'+
+        '</g>'+
+        '<g>'+
+          '<circle cx="500" cy="320" r="42" fill="url(#gh1)"/>'+
+          '<circle cx="220" cy="180" r="22" fill="#22D3EE" opacity=".9"/>'+
+          '<circle cx="780" cy="160" r="22" fill="#22D3EE" opacity=".9"/>'+
+          '<circle cx="180" cy="470" r="22" fill="#7C3AED" opacity=".9"/>'+
+          '<circle cx="820" cy="490" r="22" fill="#7C3AED" opacity=".9"/>'+
+          '<circle cx="120" cy="70" r="14" fill="#3B82F6" opacity=".75"/>'+
+          '<circle cx="340" cy="90" r="14" fill="#3B82F6" opacity=".75"/>'+
+          '<circle cx="700" cy="50" r="14" fill="#3B82F6" opacity=".75"/>'+
+          '<circle cx="80" cy="590" r="14" fill="#A855F7" opacity=".75"/>'+
+          '<circle cx="320" cy="590" r="14" fill="#A855F7" opacity=".75"/>'+
+          '<circle cx="900" cy="590" r="14" fill="#A855F7" opacity=".75"/>'+
+        '</g>'+
+        '<defs><radialGradient id="gh1"><stop offset="0" stop-color="#22D3EE"/><stop offset="1" stop-color="#7C3AED"/></radialGradient></defs>'+
+      '</svg>'+
+      '<div class="lbl cyan" style="top:298px;left:465px">sentinel</div>'+
+      '<div class="lbl" style="top:158px;left:240px">产品</div>'+
+      '<div class="lbl" style="top:138px;left:742px">部署</div>'+
+      '<div class="lbl" style="top:448px;left:140px">案例</div>'+
+      '<div class="lbl" style="top:468px;left:780px">法规</div>'+
+    '</div>';
+  return cSide({activeId:'A06',admin:true})+
+    '<div class="sc-main">'+
+    topBar('<i>资源</i> · <em>知识图谱</em>')+
+    adm([
+      {g:'图谱', items:[{t:'客服 FAQ', i:'tree', cur:true, n:'421'},{t:'产品文档', i:'doc', n:'312'},{t:'案例库', i:'case', n:'198'}]},
+      {g:'操作', items:[{t:'布局', i:'retry'},{t:'筛选', i:'tag'},{t:'导出 PNG', i:'doc'}]}
+    ], c);
+}
+
+/* A07 意图树配置 —— 多列节点 */
+function A07(){
+  function col(title,nodes,cls){
+    var h = '<div class="fcol"><h5>'+title+'</h5>';
+    nodes.forEach(function(n){
+      h += '<div class="fbox '+cls+'"><div class="nm">'+n[0]+'</div><div class="meta">'+n[1]+'</div></div>';
+    });
+    return h+'</div>';
+  }
+  var c='<div class="ttl">意图树配置</div><div class="sub">客服智能体 · 12 个意图节点</div>'+
+    '<div class="tree" style="position:relative">'+
+      '<div class="tnode root"><div class="ttl">root · 入口</div><div class="meta">匹配任意用户输入</div></div>'+
+      '<div style="display:flex;flex-direction:column;gap:14px">'+
+        '<div style="display:flex;gap:14px">'+
+          '<div class="tnode cur"><div class="ttl">账户问题</div><div class="meta">3 子节点 · 命中 41%</div></div>'+
+          '<div class="tnode"><div class="ttl">订单查询</div><div class="meta">2 子节点 · 命中 28%</div></div>'+
+          '<div class="tnode"><div class="ttl">功能咨询</div><div class="meta">4 子节点 · 命中 19%</div></div>'+
+          '<div class="tnode"><div class="ttl">其他</div><div class="meta">fallback · 12%</div></div>'+
+        '</div>'+
+        '<div style="display:flex;gap:14px;margin-left:30px">'+
+          '<div class="tnode"><div class="ttl">登录问题</div><div class="meta">2 子节点</div></div>'+
+          '<div class="tnode"><div class="ttl">密码重置</div><div class="meta">0 子节点</div></div>'+
+          '<div class="tnode"><div class="ttl">资料修改</div><div class="meta">1 子节点</div></div>'+
+        '</div>'+
+      '</div>'+
+    '</div>';
+  return cSide({activeId:'A07',admin:true})+
+    '<div class="sc-main">'+
+    topBar('<i>管理</i> · <em>意图树配置</em>')+
+    adm([
+      {g:'意图树', items:[{t:'意图树总览', i:'tree', cur:true, n:'12'}]},
+      {g:'操作', items:[{t:'预览', i:'hist'},{t:'添加节点', i:'plus'}]}
+    ], c);
+}
+
+/* A08 意图列表 —— 左意图分组 + 右表格 */
+function A08(){
+  var c='<div class="ttl">意图列表</div><div class="sub">12 个意图 · 总命中 93.7%</div>'+
+    '<div class="panel"><table>'+
+      '<tr><th>名称</th><th>路径</th><th>触发样本</th><th>命中</th><th>操作</th></tr>'+
+      '<tr><td>账户问题</td><td><code>root/account</code></td><td>"我的账号…"</td><td><span class="tag cy">41%</span></td><td><button class="tbtn ghost">…</button></td></tr>'+
+      '<tr><td>订单查询</td><td><code>root/order</code></td><td>"查一下订单…"</td><td><span class="tag cy">28%</span></td><td><button class="tbtn ghost">…</button></td></tr>'+
+      '<tr><td>功能咨询</td><td><code>root/feature</code></td><td>"怎么用…"</td><td><span class="tag vi">19%</span></td><td><button class="tbtn ghost">…</button></td></tr>'+
+      '<tr><td>登录问题</td><td><code>root/account/login</code></td><td>"登录不上…"</td><td><span class="tag ok">8%</span></td><td><button class="tbtn ghost">…</button></td></tr>'+
+      '<tr><td>密码重置</td><td><code>root/account/reset</code></td><td>"忘记密码"</td><td><span class="tag ok">6%</span></td><td><button class="tbtn ghost">…</button></td></tr>'+
+      '<tr><td>fallback</td><td><code>root/other</code></td><td>—</td><td><span class="tag wn">12%</span></td><td><button class="tbtn ghost">…</button></td></tr>'+
+      '</table></div>';
+  return cSide({activeId:'A08',admin:true})+
+    '<div class="sc-main">'+
+    topBar('<i>管理</i> · <em>意图列表</em>')+
+    adm([
+      {g:'意图', items:[{t:'全部意图', i:'tag', cur:true, n:'12'},{t:'账户类', i:'users', n:'4'},{t:'订单类', i:'doc', n:'2'},{t:'功能类', i:'bulb', n:'4'},{t:'fallback', i:'warn', n:'1'}]},
+      {g:'操作', items:[{t:'测试', i:'hist'},{t:'新建', i:'plus'}]}
+    ], c);
+}
+
+/* A09 数据通道 —— 三列流程（输入/处理/输出） */
+function A09(){
+  function col(title,nodes,cls){
+    var h='<div class="fcol"><h5>'+title+'</h5>';
+    nodes.forEach(function(n){
+      h += '<div class="fbox '+cls+'"><div class="nm">'+n[0]+'</div><div class="meta">'+n[1]+'</div></div>';
+    });
+    return h+'</div>';
+  }
+  var c='<div class="ttl">数据通道</div><div class="sub">3 路输入 / 5 路处理 / 4 路输出</div>'+
+    '<div class="flow" style="position:relative;height:520px">'+
+      col('输入源',[['Web 对话','1.2k/天'],['API 调用','820/天'],['CSV 导入','1 次/周'],['Webhook','420/天']],'c_in')+
+      '<div style="font-size:24px;color:var(--sx-faint);align-self:center">→</div>'+
+      col('处理',[['意图识别','CPU 34%'],['RAG 检索','命中 87%'],['LLM 生成','avg 1.2s'],['校验/去毒','规则 12 条'],['审计记录','保留 90 天']],'c_proc')+
+      '<div style="font-size:24px;color:var(--sx-faint);align-self:center">→</div>'+
+      col('输出',[['对话回复','1.2k/天'],['Webhook','310/天'],['数据库写入','870/天'],['邮件通知','22/天']],'c_out')+
+    '</div>';
+  return cSide({activeId:'A09',admin:true})+
+    '<div class="sc-main">'+
+    topBar('<i>管理</i> · <em>数据通道</em>')+
+    adm([
+      {g:'通道', items:[{t:'通道总览', i:'flow', cur:true, n:'12'}]},
+      {g:'操作', items:[{t:'监控', i:'hist'},{t:'新建通道', i:'plus'}]}
+    ], c);
+}
+
+/* A10 关键词映射 —— 左关键词分组 + 右映射表 */
+function A10(){
+  var c='<div class="ttl">关键词映射</div><div class="sub">关键词 → 意图 映射关系</div>'+
+    '<div class="sec"><h3>映射关系</h3>'+
+    '<div class="row"><code>登录</code> + <code>密码</code> → <span class="tag cy">root/account/login</span></div>'+
+    '<div class="row"><code>忘记密码</code> → <span class="tag cy">root/account/reset</span></div>'+
+    '<div class="row"><code>账号</code> + <code>注销</code> → <span class="tag cy">root/account/delete</span></div>'+
+    '<div class="row"><code>订单</code> + <code>查询</code> → <span class="tag cy">root/order/query</span></div>'+
+    '<div class="row"><code>物流</code> → <span class="tag cy">root/order/logistics</span></div>'+
+    '<div class="row"><code>退款</code> → <span class="tag cy">root/order/refund</span></div>'+
+    '<div class="row"><code>怎么用</code> → <span class="tag vi">root/feature</span></div>'+
+    '<div class="row"><code>导出</code> → <span class="tag vi">root/feature/export</span></div></div>'+
+    '<div class="sec"><h3>触发测试</h3>'+
+    '<div style="display:flex;gap:8px;max-width:460px"><input placeholder="输入一句话测试…" style="flex:1;background:rgba(7,12,26,.6);border:1px solid var(--sx-line-2);border-radius:4px;padding:8px 12px;color:var(--sx-text);font-size:12.5px;outline:none"><button class="tbtn">测试</button></div>'+
+    '<div style="margin-top:10px;font-size:12px;color:var(--sx-dim)">命中：<span class="tag ok" style="margin-left:6px">root/order/logistics</span></div></div>';
+  return cSide({activeId:'A10',admin:true})+
+    '<div class="sc-main">'+
+    topBar('<i>管理</i> · <em>关键词映射</em>')+
+    adm([
+      {g:'关键词', items:[{t:'账户类', i:'users', cur:true, n:'12'},{t:'订单类', i:'doc', n:'8'},{t:'功能类', i:'bulb', n:'14'}]},
+      {g:'操作', items:[{t:'触发测试', i:'hist'}]}
+    ], c);
+}
+
+/* A11 链路追踪 —— 左 trace 列表 + 右时间线/依赖图 */
+function A11(){
+  var c='<div class="ttl">链路追踪</div><div class="sub">trace-9f8e7d · 总耗时 1.24s</div>'+
+    '<div class="row23">'+
+      '<div class="panel"><h3>调用时间线</h3>'+
+      '<div class="tl-row" style="background:rgba(34,211,238,.05);border-left:3px solid var(--sx-cyan);padding-left:14px;margin-left:-14px">'+
+        '<div class="t">0 ms</div><div class="msg"><b>POST /api/chat</b></div><div class="who">gateway</div></div>'+
+      '<div class="tl-row"><div class="t">142 ms</div><div class="msg">→ <b>intent.classify</b></div><div class="who">agent-python</div></div>'+
+      '<div class="tl-row"><div class="t">318 ms</div><div class="msg">↳ <b>rag.search</b> · 命中 6/12</div><div class="who">backend-java</div></div>'+
+      '<div class="tl-row"><div class="t">682 ms</div><div class="msg">↳ ↳ <b>embedding</b> · cosine 0.82</div><div class="who">vector-db</div></div>'+
+      '<div class="tl-row"><div class="t">894 ms</div><div class="msg">→ <b>llm.generate</b> · 412 tokens</div><div class="who">agent-python</div></div>'+
+      '<div class="tl-row"><div class="t">1.21 s</div><div class="msg">→ <b>audit.write</b></div><div class="who">backend-java</div></div>'+
+      '</div>'+
+      '<div class="panel"><h3>依赖关系</h3>'+
+      '<div class="trace-graph" style="height:360px">'+
+        '<svg viewBox="0 0 400 360">'+
+          '<g stroke="rgba(34,211,238,.35)" stroke-width="1.5" fill="none">'+
+            '<line x1="200" y1="40" x2="120" y2="120"/><line x1="200" y1="40" x2="280" y2="120"/>'+
+            '<line x1="120" y1="120" x2="80" y2="220"/><line x1="120" y1="120" x2="160" y2="220"/>'+
+            '<line x1="280" y1="120" x2="320" y2="220"/><line x1="280" y1="120" x2="240" y2="220"/>'+
+          '</g>'+
+          '<g>'+
+            '<rect x="160" y="20" width="80" height="36" rx="3" fill="#04070F" stroke="#22D3EE"/>'+
+            '<rect x="80" y="100" width="80" height="36" rx="3" fill="#04070F" stroke="#22D3EE"/>'+
+            '<rect x="240" y="100" width="80" height="36" rx="3" fill="#04070F" stroke="#7C3AED"/>'+
+            '<rect x="40" y="200" width="80" height="36" rx="3" fill="#04070F" stroke="#3B82F6"/>'+
+            '<rect x="120" y="200" width="80" height="36" rx="3" fill="#04070F" stroke="#3B82F6"/>'+
+            '<rect x="200" y="200" width="80" height="36" rx="3" fill="#04070F" stroke="#A855F7"/>'+
+          '</g>'+
+          '<g fill="#E6EDF7" font-family="JetBrains Mono" font-size="10" text-anchor="middle">'+
+            '<text x="200" y="42">POST /chat</text>'+
+            '<text x="120" y="122">intent</text>'+
+            '<text x="280" y="122">llm</text>'+
+            '<text x="80" y="222">embed</text>'+
+            '<text x="160" y="222">rag</text>'+
+            '<text x="240" y="222">audit</text>'+
+          '</g>'+
+        '</svg>'+
+      '</div></div>'+
+    '</div>';
+  return cSide({activeId:'A11',admin:true})+
+    '<div class="sc-main">'+
+    topBar('<i>管理</i> · <em>链路追踪</em>')+
+    adm([
+      {g:'追踪', items:[{t:'当前链路', i:'link', cur:true},{t:'历史链路', i:'hist'}]},
+      {g:'操作', items:[{t:'导出', i:'doc'},{t:'刷新', i:'retry'}]}
+    ], c);
+}
+
+/* A12 审计日志 —— 左操作类型 + 右表格 */
+function A12(){
+  var c='<div class="ttl">审计日志</div><div class="sub">保留 90 天 · 共 12,847 条</div>'+
+    '<div class="panel"><table>'+
+      '<tr><th>时间</th><th>操作者</th><th>动作</th><th>对象</th><th>IP</th><th>结果</th></tr>'+
+      '<tr><td>14:32:18</td><td>admin</td><td>UPDATE</td><td>提示词 v3</td><td>10.0.1.12</td><td><span class="tag ok">OK</span></td></tr>'+
+      '<tr><td>14:18:02</td><td>张明</td><td>CREATE</td><td>案件 CASE-2024-088</td><td>10.0.1.45</td><td><span class="tag ok">OK</span></td></tr>'+
+      '<tr><td>13:50:46</td><td>李华</td><td>IMPORT</td><td>12 篇文档</td><td>10.0.1.78</td><td><span class="tag ok">OK</span></td></tr>'+
+      '<tr><td>13:22:11</td><td>system</td><td>REBUILD</td><td>向量索引</td><td>—</td><td><span class="tag wn">RUNNING</span></td></tr>'+
+      '<tr><td>13:08:34</td><td>王刚</td><td>DELETE</td><td>文档 doc-1099</td><td>10.0.1.62</td><td><span class="tag bd">DENIED</span></td></tr>'+
+      '<tr><td>12:45:01</td><td>admin</td><td>LOGIN</td><td>Web Console</td><td>10.0.1.12</td><td><span class="tag ok">OK</span></td></tr>'+
+      '<tr><td>12:14:22</td><td>guest</td><td>LOGIN</td><td>Web Console</td><td>203.0.113.42</td><td><span class="tag bd">FAIL</span></td></tr>'+
+      '</table></div>';
+  return cSide({activeId:'A12',admin:true})+
+    '<div class="sc-main">'+
+    topBar('<i>管理</i> · <em>审计日志</em>')+
+    adm([
+      {g:'日志', items:[{t:'全部日志', i:'scroll', cur:true, n:'12847'},{t:'登录记录', i:'users', n:'1021'},{t:'操作记录', i:'edit', n:'9340'},{t:'异常', i:'warn', n:'286'}]},
+      {g:'操作', items:[{t:'导出', i:'doc'}]}
+    ], c);
+}
+
+/* A13 案件调查 —— 左案件列表 + 右详情 */
+function A13(){
+  var c='<div class="ttl">案件调查</div><div class="sub">当前案件 · CASE-087 李四账户盗用</div>'+
+    '<div class="panel"><h3>事件时间线</h3>'+
+      '<div class="evs">'+
+        '<div class="ev"><span class="tm">8/22 14:08</span><span>用户提交申诉，账户资金异常减少 4,200 元</span></div>'+
+        '<div class="ev"><span class="tm">8/22 15:30</span><span>自动核查：检测到 3 笔异地登录（广东→黑龙江）</span></div>'+
+        '<div class="ev"><span class="tm">8/22 17:12</span><span>客服介入，初步判断为盗用</span></div>'+
+        '<div class="ev"><span class="tm">8/23 09:45</span><span>用户提交身份证补正材料</span></div>'+
+        '<div class="ev"><span class="tm">8/23 14:20</span><span>已冻结涉案账户，等待公安反馈</span></div>'+
+      '</div></div>'+
+    '<div class="row2">'+
+      '<div class="panel"><h3>关联用户</h3>'+
+        '<p style="margin:4px 0;font-size:12.5px">李四 · 注册于 2023-04</p>'+
+        '<p style="margin:4px 0;font-size:12.5px">历史对话 12 / 案件 1</p></div>'+
+      '<div class="panel"><h3>下一步</h3>'+
+        '<p style="margin:4px 0;font-size:12.5px">① 等待公安立案回执</p>'+
+        '<p style="margin:4px 0;font-size:12.5px">② 资金追偿方案</p></div></div>';
+  return cSide({activeId:'A13',admin:true})+
+    '<div class="sc-main">'+
+    topBar('<i>管理</i> · <em>案件调查</em>')+
+    adm([
+      {g:'案件', items:[{t:'CASE-088 张三', i:'case', bd:true},{t:'CASE-087 李四', i:'case', cur:true},{t:'CASE-086 钓鱼', i:'case'},{t:'CASE-085 跨境', i:'case'}]},
+      {g:'状态', items:[{t:'紧急', i:'warn', n:'1'},{t:'处理中', i:'retry', n:'1'},{t:'已结案', i:'shield', n:'1'}]}
+    ], c);
+}
+
+/* A14 用户管理 —— 左角色分组 + 右表格 */
+function A14(){
+  var c='<div class="ttl">用户管理</div><div class="sub">28 名用户 · 1 个超级管理员</div>'+
+    '<div class="panel"><table>'+
+      '<tr><th>账号</th><th>角色</th><th>最后登录</th><th>状态</th><th>操作</th></tr>'+
+      '<tr><td><b>admin</b></td><td><span class="tag cy">SUPER</span></td><td>14:32 · 10.0.1.12</td><td><span class="tag ok">在线</span></td><td><button class="tbtn ghost">…</button></td></tr>'+
+      '<tr><td>zhang.ming</td><td><span class="tag vi">案件员</span></td><td>14:18 · 10.0.1.45</td><td><span class="tag ok">在线</span></td><td><button class="tbtn ghost">…</button></td></tr>'+
+      '<tr><td>li.hua</td><td><span class="tag vi">客服</span></td><td>13:50 · 10.0.1.78</td><td><span class="tag wn">离线</span></td><td><button class="tbtn ghost">…</button></td></tr>'+
+      '<tr><td>wang.gang</td><td><span class="tag vi">审核员</span></td><td>昨天 · 10.0.1.62</td><td><span class="tag wn">离线</span></td><td><button class="tbtn ghost">…</button></td></tr>'+
+      '<tr><td>liu.fang</td><td><span class="tag vi">客服</span></td><td>8/28 · 10.0.1.91</td><td><span class="tag bd">禁用</span></td><td><button class="tbtn ghost">…</button></td></tr>'+
+      '</table></div>';
+  return cSide({activeId:'A14',admin:true})+
+    '<div class="sc-main">'+
+    topBar('<i>管理</i> · <em>用户管理</em>')+
+    adm([
+      {g:'用户', items:[{t:'全部用户', i:'users', cur:true, n:'28'},{t:'超级管理员', i:'shield', n:'1'},{t:'案件员', i:'case', n:'4'},{t:'客服', i:'bulb', n:'12'},{t:'审核员', i:'scroll', n:'3'}]},
+      {g:'操作', items:[{t:'导出', i:'doc'},{t:'新建用户', i:'plus'}]}
+    ], c);
+}
+
+/* A15 示例问题 —— 左状态分组 + 右问题列表 */
+function A15(){
+  var c='<div class="ttl">示例问题</div><div class="sub">用于引导用户提问 · 共 18 条</div>'+
+    '<div class="row2">'+
+      '<div class="panel"><h3>已发布</h3>'+
+      '<table><tr><th>问题</th><th>意图</th><th>点击</th></tr>'+
+      '<tr><td>如何重置密码？</td><td><span class="tag cy">account/reset</span></td><td>1.2k</td></tr>'+
+      '<tr><td>怎么查看订单物流？</td><td><span class="tag cy">order/logistics</span></td><td>980</td></tr>'+
+      '<tr><td>支持哪些支付方式？</td><td><span class="tag vi">feature/pay</span></td><td>820</td></tr>'+
+      '<tr><td>如何开具发票？</td><td><span class="tag cy">order/invoice</span></td><td>540</td></tr>'+
+      '</table></div>'+
+      '<div class="panel"><h3>草稿</h3>'+
+      '<table><tr><th>问题</th><th>状态</th></tr>'+
+      '<tr><td>账户被冻结怎么办？</td><td><span class="tag wn">待审</span></td></tr>'+
+      '<tr><td>如何导出数据？</td><td><span class="tag wn">待审</span></td></tr>'+
+      '</table></div>'+
+    '</div>';
+  return cSide({activeId:'A15',admin:true})+
+    '<div class="sc-main">'+
+    topBar('<i>管理</i> · <em>示例问题</em>')+
+    adm([
+      {g:'问题', items:[{t:'已发布', i:'doc', cur:true, n:'12'},{t:'草稿', i:'edit', n:'4'},{t:'已归档', i:'hist', n:'2'}]},
+      {g:'操作', items:[{t:'同步', i:'retry'},{t:'新建', i:'plus'}]}
+    ], c);
+}
+
+/* A16 系统设置 —— 分组设置 */
+function A16(){
+  var c='<div class="ttl">系统设置</div><div class="sub">配置站点、安全、通知与高级选项</div>'+
+    '<div class="sec"><h3>基本</h3>'+
+      '<div class="panel"><table>'+
+      '<tr><td>站点名称</td><td><input value="sentinel" style="background:rgba(7,12,26,.6);border:1px solid var(--sx-line-2);border-radius:3px;padding:5px 9px;color:var(--sx-text);font-size:12.5px;width:220px"></td></tr>'+
+      '<tr><td>登录背景</td><td><span class="tag cy">Aurora Deep</span> <button class="tbtn ghost" style="margin-left:8px">更换</button></td></tr>'+
+      '<tr><td>主语言</td><td>简体中文</td></tr></table></div></div>'+
+    '<div class="sec"><h3>安全</h3>'+
+      '<div class="panel"><table>'+
+      '<tr><td>会话超时</td><td>30 分钟</td></tr>'+
+      '<tr><td>IP 白名单</td><td>10.0.0.0/8, 192.168.0.0/16</td></tr>'+
+      '<tr><td>双因素认证</td><td><span class="tag ok">已开启</span></td></tr>'+
+      '<tr><td>密码策略</td><td>≥ 12 位 · 含大小写数字符号</td></tr></table></div></div>'+
+    '<div class="sec"><h3>通知</h3>'+
+      '<div class="panel"><table>'+
+      '<tr><td>系统异常</td><td>邮件 + Webhook</td></tr>'+
+      '<tr><td>案件分配</td><td>站内消息</td></tr>'+
+      '<tr><td>每日摘要</td><td>每早 09:00</td></tr></table></div></div>'+
+    '<div class="sec"><h3>高级</h3>'+
+      '<div class="panel"><table>'+
+      '<tr><td>API 限速</td><td>60 次/分钟/用户</td></tr>'+
+      '<tr><td>审计保留</td><td>90 天</td></tr>'+
+      '<tr><td>开发者模式</td><td><span class="tag bd">关闭</span></td></tr></table></div></div>';
+  return cSide({activeId:'A16',admin:true})+
+    '<div class="sc-main">'+
+    topBar('<i>系统</i> · <em>设置</em>')+
+    adm([
+      {g:'设置', items:[{t:'基本', i:'cog', cur:true},{t:'安全', i:'shield'},{t:'通知', i:'bell'},{t:'高级', i:'gear'}]}
+    ], c);
+}
+
+/* ==========================================================================
+   PAGES 数组 + 注册
+   ========================================================================== */
+var PAGES = [
+  {id:'P01', type:'c', title:'登录',         dsc:'账号密码 · 居中卡片 · 渐变按钮', render:P01},
+  {id:'P02', type:'c', title:'欢迎',         dsc:'Hero Fredoka × Squash 弹跳',    render:P02},
+  {id:'P03', type:'c', title:'对话',         dsc:'消息流 · 投票 · 用户右对齐',    render:P03},
+  {id:'P04', type:'c', title:'更新日志',     dsc:'版本倒序 · 变更分类',           render:P04},
+  {id:'P05', type:'c', title:'文档预览',     dsc:'左目录右内容 · 代码块',         render:P05},
+  {id:'P06', type:'c', title:'404',          dsc:'大字编号 · 返回 CTA',           render:P06},
+  {id:'A00', type:'a', title:'Dashboard',    dsc:'KPI · 趋势 · 资源 · 案件',     render:A00},
+  {id:'A01', type:'a', title:'智能体管理',   dsc:'卡片列表 · 状态徽标',           render:A01},
+  {id:'A02', type:'a', title:'提示词配置',   dsc:'编辑器 + 变量表',              render:A02},
+  {id:'A03', type:'a', title:'知识库管理',   dsc:'卡片网格 · 用量统计',           render:A03},
+  {id:'A04', type:'a', title:'文档管理',     dsc:'表格 · 标签筛选',              render:A04},
+  {id:'A05', type:'a', title:'分块管理',     dsc:'单文档分块 · 命中统计',         render:A05},
+  {id:'A06', type:'a', title:'知识图谱',     dsc:'节点关系可视化',                render:A06},
+  {id:'A07', type:'a', title:'意图树配置',   dsc:'多列节点树 · 命中分布',         render:A07},
+  {id:'A08', type:'a', title:'意图列表',     dsc:'表格 · 触发样本',              render:A08},
+  {id:'A09', type:'a', title:'数据通道',     dsc:'输入/处理/输出 三列流程',       render:A09},
+  {id:'A10', type:'a', title:'关键词映射',   dsc:'关键词 → 意图映射表',          render:A10},
+  {id:'A11', type:'a', title:'链路追踪',     dsc:'调用时间线 + 依赖图',          render:A11},
+  {id:'A12', type:'a', title:'审计日志',     dsc:'时间倒序 · 操作记录',          render:A12},
+  {id:'A13', type:'a', title:'案件调查',     dsc:'左列表右详情 · 时间线',         render:A13},
+  {id:'A14', type:'a', title:'用户管理',     dsc:'表格 · 角色权限',              render:A14},
+  {id:'A15', type:'a', title:'示例问题',     dsc:'引导问题 · 发布/草稿',         render:A15},
+  {id:'A16', type:'a', title:'系统设置',     dsc:'基本/安全/通知/高级 分组',     render:A16}
+];
+
+/* ==========================================================================
+   渲染：grid + 缩略图 + modal
+   ========================================================================== */
+var ACTIVE_TAB='all';
+
+/* ==========================================================================
+   重叠检测器 —— 模块独立化后的冲突告警（缩略图概览）
+   对 tile 的 stage 内所有 [data-mod] 模块，两两检测矩形相交。
+   仅相交才在 tile 标题右上加红色「冲突 N」角标提示；
+   详细标红与列表在点击放大后的 modal 里展示（openModal）。
+   ========================================================================== */
+function checkOverlap(tile, stage){
+  if(!stage) return;
+  clearConflictMarks(stage);
+  var mods = stage.querySelectorAll('[data-mod]');
+  if(!mods.length) return;
+  var sRect = stage.getBoundingClientRect();
+  var scale = sRect.width / stage.offsetWidth;   /* CSS 坐标与 transform 缩放后的屏幕坐标换算 */
+  var boxes = [];
+  mods.forEach(function(el){
+    var r = el.getBoundingClientRect();
+    var left = (r.left - sRect.left) / scale;
+    var top  = (r.top  - sRect.top)  / scale;
+    boxes.push({ el:el, name:el.getAttribute('data-mod'),
+      top:top, left:left, right:left + r.width/scale, bottom:top + r.height/scale });
+  });
+  /* 排除「完全包含」的父子嵌套（容器包内部模块是正常的，不算重叠冲突） */
+  function isInside(a,b){
+    return a.left <= b.left && a.right >= b.right && a.top <= b.top && a.bottom >= b.bottom;
+  }
+  /* 两两检测「真实相交」= 部分重叠，而非完全包含 */
+  var conflicts = 0;
+  var marked = [];
+  for(var i=0;i<boxes.length;i++)for(var j=i+1;j<boxes.length;j++){
+    var a=boxes[i], b=boxes[j];
+    if(isInside(a,b) || isInside(b,a)) continue;          /* 嵌套包含，跳过 */
+    if(a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom){
+      conflicts++;
+      marked.push(a,b);
+    }
+  }
+  marked.forEach(function(b){ markConflictBox(stage, b); });
+  for(var k=0;k<marked.length;k+=2){
+    var ma=marked[k], mb=marked[k+1];
+    addConflictHit(stage, {
+      ox:Math.max(ma.left,mb.left), oy:Math.max(ma.top,mb.top),
+      ow:Math.min(ma.right,mb.right)-Math.max(ma.left,mb.left),
+      oh:Math.min(ma.bottom,mb.bottom)-Math.max(ma.top,mb.top)
+    });
+  }
+  /* 移除旧的角标 */
+  var old = tile.querySelector('.tile-cf'); if(old) old.remove();
+  /* 有冲突：在标题行加红色角标 */
+  if(conflicts){
+    var badge = document.createElement('span');
+    badge.className = 'tile-cf';
+    badge.textContent = '冲突 '+conflicts;
+    badge.title = '点击放大查看冲突模块';
+    var ph = tile.querySelector('.ph');
+    if(ph) ph.appendChild(badge);
+  }
+}
+
+function build(){
+  var grid=document.getElementById('grid'); grid.innerHTML='';
+  PAGES.forEach(function(p){
+    if(ACTIVE_TAB!=='all' && p.type!==ACTIVE_TAB) return;
+    var tile=document.createElement('div');
+    tile.className='tile';
+    tile.innerHTML='<div class="ph">'+
+      '<span class="pid">'+p.id+'</span>'+
+      '<h3 class="ttl">'+p.title+'</h3>'+
+      '</div>'+
+      '<p class="dsc">'+p.dsc+'</p>'+
+      '<div class="thumb"><span class="ph-old">'+p.id+' · '+p.title.toUpperCase()+'</span>'+
+        '<div class="stage">'+p.render()+'</div></div>';
+    tile.addEventListener('click',function(){ openModal(p); });
+    grid.appendChild(tile);
+  });
+  /* 等待字体和布局完成后再跑重叠检测，确保所有模块坐标稳定 */
+  requestAnimationFrame(function(){
+    requestAnimationFrame(function(){
+      grid.querySelectorAll('.tile').forEach(function(t){
+        checkOverlap(t, t.querySelector('.stage'));
+      });
+    });
+  });
+}
+
+function clearConflictMarks(root){
+  root.querySelectorAll('.ovl').forEach(function(el){ el.classList.remove('ovl'); });
+  root.querySelectorAll('.ovl-badge,.ovl-hit').forEach(function(el){ el.remove(); });
+}
+function markConflictBox(root, b){
+  if(!root || !b || !b.el) return;
+  b.el.classList.add('ovl');
+  if(root.querySelector('.ovl-badge[data-for="'+b.name+'"]')) return;
+  var badge = document.createElement('span');
+  badge.className = 'ovl-badge';
+  badge.dataset.for = b.name;
+  badge.textContent = '⚠ 冲突 · '+b.name;
+  badge.style.left = Math.max(0, b.left + 4) + 'px';
+  badge.style.top = Math.max(0, b.top + 4) + 'px';
+  root.appendChild(badge);
+}
+function addConflictHit(root, c){
+  var hit = document.createElement('div');
+  hit.className = 'ovl-hit';
+  hit.style.left = c.ox + 'px';
+  hit.style.top = c.oy + 'px';
+  hit.style.width = Math.max(8, c.ow) + 'px';
+  hit.style.height = Math.max(8, c.oh) + 'px';
+  root.appendChild(hit);
+}
+/* modal 内冲突高亮：保留兼容点击列表时聚焦 */
+function flashOvl(el){
+  if(!el) return;
+  el.classList.add('ovl');
+}
+/* 查找页面对象 */
+function findPage(id){
+  for(var i=0;i<PAGES.length;i++) if(PAGES[i].id===id) return PAGES[i];
+  return null;
+}
+
+/* 后台左侧导航宽度调整，仅作用于当前打开的预览页 */
+function bindAdmNavResizer(root){
+  var adm = root && root.querySelector('.adm');
+  var resizer = adm && adm.querySelector('.adm-resizer');
+  if(!adm || !resizer) return;
+
+  var startX = 0;
+  var startWidth = 190;
+  var active = false;
+
+  resizer.addEventListener('pointerdown', function(e){
+    if(e.button !== 0) return;
+    active = true;
+    startX = e.clientX;
+    startWidth = adm.querySelector('.adm-nav').getBoundingClientRect().width;
+    adm.classList.add('is-resizing');
+    resizer.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  resizer.addEventListener('pointermove', function(e){
+    if(!active) return;
+    var width = Math.max(160, Math.min(320, startWidth + e.clientX - startX));
+    adm.style.setProperty('--adm-nav-w', width + 'px');
+  });
+  resizer.addEventListener('pointerup', function(){ active = false; adm.classList.remove('is-resizing'); });
+  resizer.addEventListener('pointercancel', function(){ active = false; adm.classList.remove('is-resizing'); });
+}
+
+/* 渲染指定页面到 modal 内容区，并绑定翻页交互 */
+function renderIntoModal(p){
+  document.getElementById('mPid').textContent = p.id;
+  document.getElementById('mTtl').textContent = p.title;
+  document.getElementById('mMeta').textContent = '1280 × 800 · 可缩放 · 可翻页';
+  document.getElementById('mCv').innerHTML = p.render();
+  bindAdmNavResizer(document.getElementById('mCv'));
+
+  /* 自适应缩放 */
+  var box = document.querySelector('.modal .box');
+  var wrap = document.getElementById('mCvWrap');
+  var vw = window.innerWidth || 1280;
+  var vh = window.innerHeight || 800;
+  var availW = (box && box.clientWidth) ? box.clientWidth - 24 : vw * 0.9;
+  var availH = (box && box.clientHeight) ? box.clientHeight - 60 : vh * 0.86;
+  var s = Math.max(0.2, Math.min(1, availW/1280, availH/800));
+  wrap.style.transform = 'scale('+s+')';
+  wrap.style.height = (800*s)+'px';
+  wrap.style.width = (1280*s)+'px';
+
+  /* 绑定翻页切换：data-navto 元素点击 -> navigate */
+  var cv = document.getElementById('mCv');
+  cv.querySelectorAll('[data-navto]').forEach(function(el){
+    el.addEventListener('click', function(){
+      var to = el.getAttribute('data-navto');
+      if(to) navigate(to);
+    });
+  });
+
+  /* 运行重叠检测 */
+  setTimeout(function(){ runOverlapCheck(cv); }, 60);
+}
+
+/* 翻页切换：当前页飞出 -> 加载目标页 -> 飞入 */
+function navigate(pid){
+  var target = findPage(pid);
+  if(!target) return;
+  var wrap = document.getElementById('mCvWrap');
+  /* 飞出 */
+  wrap.classList.remove('pg-in');
+  wrap.classList.add('pg-out');
+  setTimeout(function(){
+    renderIntoModal(target);
+    wrap.classList.remove('pg-out');
+    void wrap.offsetWidth; /* 重启动画 */
+    wrap.classList.add('pg-in');
+    setTimeout(function(){ wrap.classList.remove('pg-in'); }, 450);
+  }, 430);
+}
+
+/* modal 内重叠检测（抽取） */
+function runOverlapCheck(cv){
+  clearConflictMarks(cv);
+  var mods = cv.querySelectorAll('[data-mod]');
+  var conflicts = [];
+  function isInside(a,b){
+    return a.left<=b.left && a.right>=b.right && a.top<=b.top && a.bottom>=b.bottom;
+  }
+  if(mods.length){
+    var boxes=[];
+    var sr=cv.getBoundingClientRect();
+    var scale = cv.getBoundingClientRect().width/1280;
+    mods.forEach(function(el){
+      var r=el.getBoundingClientRect();
+      boxes.push({el:el,name:el.getAttribute('data-mod'),
+        top:(r.top-sr.top)/scale,left:(r.left-sr.left)/scale,
+        right:(r.left-sr.left)/scale+r.width/scale,bottom:(r.top-sr.top)/scale+r.height/scale});
+    });
+    for(var i=0;i<boxes.length;i++)for(var j=i+1;j<boxes.length;j++){
+      var a=boxes[i],b=boxes[j];
+      if(isInside(a,b) || isInside(b,a)) continue;
+      if(a.left<b.right && b.left<a.right && a.top<b.bottom && b.top<a.bottom){
+        var oL=Math.max(a.left,b.left), oT=Math.max(a.top,b.top);
+        var oR=Math.min(a.right,b.right), oB=Math.min(a.bottom,b.bottom);
+        conflicts.push({
+          a:a, b:b, ow:Math.round(oR-oL), oh:Math.round(oB-oT),
+          ox:Math.round(oL), oy:Math.round(oT),
+          aRect:'['+Math.round(a.left)+','+Math.round(a.top)+' '+Math.round(a.right-a.left)+'×'+Math.round(a.bottom-a.top)+']',
+          bRect:'['+Math.round(b.left)+','+Math.round(b.top)+' '+Math.round(b.right-b.left)+'×'+Math.round(b.bottom-b.top)+']'
+        });
+      }
+    }
+  }
+  conflicts.forEach(function(c){ markConflictBox(cv, c.a); markConflictBox(cv, c.b); addConflictHit(cv, c); });
+  var btn=document.getElementById('mCfBtn');
+  var list=document.getElementById('mCfList');
+  btn.textContent = '冲突 '+(conflicts.length ? conflicts.length : 0);
+  btn.style.display = conflicts.length ? '' : 'none';
+  list.innerHTML='';
+  if(!conflicts.length){
+    list.innerHTML='<div class="empty">✓ 无布局冲突</div>';
+  }else{
+    conflicts.forEach(function(c){
+      var it=document.createElement('div');
+      it.className='it';
+      it.innerHTML='▣ <b>'+c.a.name+'</b> × <b>'+c.b.name+'</b><br>'+
+        '<span style="opacity:.8">重叠区 ('+c.ox+','+c.oy+') '+c.ow+'×'+c.oh+'px</span>';
+      it.title = c.a.name+' '+c.aRect+'\n'+c.b.name+' '+c.bRect;
+      it.addEventListener('click',function(){
+        flashOvl(c.a.el); flashOvl(c.b.el);
+        list.classList.add('hide');
+      });
+      list.appendChild(it);
+    });
+  }
+  conflicts.forEach(function(c){ c.a.el.classList.add('ovl'); c.b.el.classList.add('ovl'); });
+}
+
+function openModal(p){
+  renderIntoModal(p);
+  document.getElementById('modal').classList.add('open');
+}
+document.getElementById('mClose').addEventListener('click', function(){
+  document.getElementById('modal').classList.remove('open');
+});
+document.getElementById('mCfBtn').addEventListener('click', function(e){
+  e.stopPropagation();
+  document.getElementById('mCfList').classList.toggle('hide');
+});
+document.getElementById('modal').addEventListener('click', function(e){
+  if(e.target===this) this.classList.remove('open');
+});
+document.addEventListener('keydown', function(e){
+  if(e.key==='Escape') document.getElementById('modal').classList.remove('open');
+});
+
+/* Tabs */
+var tabs=document.querySelectorAll('#tabs button');
+tabs.forEach(function(b){
+  b.addEventListener('click',function(){
+    tabs.forEach(function(x){ x.classList.remove('cur'); });
+    b.classList.add('cur');
+    ACTIVE_TAB = b.dataset.tab;
+    build();
+  });
+});
+document.getElementById('btnTop').addEventListener('click',function(){ window.scrollTo({top:0,behavior:'smooth'}); });
+document.getElementById('btnC').addEventListener('click',function(){
+  ACTIVE_TAB='c'; tabs.forEach(function(x){ x.classList.remove('cur'); }); tabs[1].classList.add('cur'); build(); window.scrollTo({top:0,behavior:'smooth'});
+});
+document.getElementById('btnA').addEventListener('click',function(){
+  ACTIVE_TAB='a'; tabs.forEach(function(x){ x.classList.remove('cur'); }); tabs[2].classList.add('cur'); build(); window.scrollTo({top:0,behavior:'smooth'});
+});
+
+build();
+})();
+</script>
+
+</body>
+</html>

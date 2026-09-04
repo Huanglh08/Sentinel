@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -25,6 +26,29 @@ DEFAULT_AMBIGUITY_SCORE_RATIO = 0.8
 DEFAULT_AMBIGUITY_MARGIN = 0.15
 DEFAULT_MAX_OPTIONS = 5
 INTENT_MIN_SCORE = 0.3
+
+# ---- 澄清反问治理（通用机制开关，不针对特定知识库）----
+# mode:
+#   ask   = 旧行为：文档级分数对撞(ratio>=阈值)即反问
+#   merge = 治理行为：best 分数达到置信线时放行，由作用域解析自动合并多库检索
+#           （RetrievalScopeResolver._extract_kb_intents 拍平所有 score>=0.3 的 KB
+#            节点并合并 collection，rerank 门控兜底精度），仅 best 低于置信线
+#           （真·无法识别意图）时才反问引导
+#   off   = 完全关闭澄清反问
+DEFAULT_GUIDANCE_MODE = "merge"
+DEFAULT_GUIDANCE_LOW_CONFIDENCE = 0.5  # 与 RetrievalScopeResolver confidence_threshold 对齐
+
+
+def _guidance_mode_from_env() -> str:
+    mode = (os.getenv("INTENT_GUIDANCE_MODE") or DEFAULT_GUIDANCE_MODE).strip().lower()
+    return mode if mode in ("ask", "merge", "off") else DEFAULT_GUIDANCE_MODE
+
+
+def _guidance_low_confidence_from_env() -> float:
+    try:
+        return float(os.getenv("INTENT_GUIDANCE_LOW_CONFIDENCE", DEFAULT_GUIDANCE_LOW_CONFIDENCE))
+    except (TypeError, ValueError):
+        return DEFAULT_GUIDANCE_LOW_CONFIDENCE
 
 
 @dataclass
@@ -59,12 +83,18 @@ class IntentGuidanceService:
         ambiguity_margin: float = DEFAULT_AMBIGUITY_MARGIN,
         max_options: int = DEFAULT_MAX_OPTIONS,
         llm_checker: Any = None,
+        mode: str | None = None,
+        low_confidence: float | None = None,
     ) -> None:
         self._enabled = enabled
         self._ambiguity_score_ratio = ambiguity_score_ratio
         self._ambiguity_margin = ambiguity_margin
         self._max_options = max_options
         self._llm_checker = llm_checker
+        self._mode = mode or _guidance_mode_from_env()
+        self._low_confidence = (
+            low_confidence if low_confidence is not None else _guidance_low_confidence_from_env()
+        )
 
     def detect_ambiguity(
         self,
@@ -81,6 +111,9 @@ class IntentGuidanceService:
             GuidanceDecision: 引导决策
         """
         if not self._enabled:
+            return GuidanceDecision.none()
+
+        if self._mode == "off":
             return GuidanceDecision.none()
 
         if not sub_intents or len(sub_intents) != 1:
@@ -208,6 +241,15 @@ class IntentGuidanceService:
         margin = self._ambiguity_margin
 
         if ratio >= threshold:
+            # 澄清反问治理：文档级分数对撞不等于用户意图歧义。
+            # best 已达置信线时放行 → 作用域解析自动合并多库检索，rerank 门控兜底精度；
+            # 仅 best 低于置信线（真·无法识别意图）时才反问引导用户。
+            if self._mode == "merge" and top >= self._low_confidence:
+                _logger.info(
+                    "分数比值(ratio=%.3f)达阈值但 best(top=%.3f)已达置信线(%.3f), 放行合并检索",
+                    ratio, top, self._low_confidence,
+                )
+                return False
             _logger.info("分数比值(ratio=%.3f)超过阈值(%.3f), 判定为歧义", ratio, threshold)
             return True
 

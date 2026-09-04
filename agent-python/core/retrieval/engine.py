@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
 from core.retrieval.scope_resolver import RetrievalScope
+from core.retrieval.rerank import SiliconFlowReranker
 from core.retrieval.types import (
     ChannelType,
     KnowledgeRetrievalResult,
@@ -85,6 +86,11 @@ class RetrievalConfig:
     # 1:1 翻译 ragent SearchChannelProperties.Channels.timeoutMs：单一全局通道级超时
     # （Java 不按通道各自配超时，所有通道共用这一个值；<=0 表示不另设超时）
     channel_timeout_ms: float = 15_000.0
+    # 双模型 rerank 相关性门控（P1 负样本治理；对应 Java rag.retrieval-gate.*）
+    gate_enabled: bool = False
+    gate_bge_threshold: float = 0.10
+    gate_qwen3_threshold: float = 0.20
+    gate_top_n: int = 8
 
     @classmethod
     def default(cls) -> "RetrievalConfig":
@@ -292,6 +298,98 @@ class RerankPostProcessor:
             _logger.info("检索归因 - 图谱证据存活: %d/%d", graph_out, graph_in)
 
 
+class RelevanceGatePostProcessor:
+    """双模型 rerank 相关性门控（order=15，Rerank 之后、MetadataEnrichment 之前）。
+
+    负样本治理：问题与知识库无关时，检索/精排仍会返回"高分垃圾"chunk，下游
+    基于垃圾上下文作答即幻觉。本处理器用 bge-reranker-v2-m3 × Qwen3-Reranker-0.6B
+    双模型对精排后的最终 chunk 打分，AND 门控（两个模型的 top1 同时低于阈值）
+    才判定"库中大概率无相关信息"，返回空列表 → 上层走"库中无此信息"拒答。
+
+    bge 分数复用与 qwen3 惰性确认（P2 延迟优化，AND 门控语义不变）：
+      - Rerank 阶段（order=10）已用同一 bge 模型对同一批 chunk 打过分，gate 直接
+        复用 chunk.score 作为 bge_top1，省一次重复 API 调用
+      - AND 语义下 bge_top1 达阈值即确定放行，仅 bge 低置信（可能切空）时才调
+        qwen3 交叉确认 —— 正常请求零 gate API 调用
+      - 复用前提：Rerank 实际由 SiliconFlowReranker（bge）执行。RoutingReranker
+        降级到 LLMReranker 或全部失败时，chunk.score 是 LLM 分/RRF 融合分，
+        语义不符，回退到 gate 双模型自打分的原路径
+    - 打分对象与离线校准（eval/rerank_gate_eval.py）一致：Rerank 后的最终 chunk
+    - 打分是同步 GPU/CPU 密集任务，包 asyncio.to_thread 避免阻塞事件循环
+    - fail-open：gate 为 None / 抛异常 / 打分失败 → 原样放行，绝不因门控故障误拒
+    """
+
+    name = "RelevanceGate"
+    order = 15
+
+    def __init__(self, gate: Any | None, config: RetrievalConfig, reranker: Any | None = None) -> None:
+        self.gate = gate
+        self.config = config
+        self.reranker = reranker
+
+    def is_enabled(self, context: SearchContext) -> bool:
+        return self.config.gate_enabled and self.gate is not None
+
+    def _reusable_bge_top1(self, chunks: list[RetrievedChunk]) -> float | None:
+        """chunks[0].score 可作 bge_top1 时返回该值，否则 None（回退双模型路径）。
+
+        前提：Rerank 由 SiliconFlowReranker 实际执行（RoutingReranker.last_used
+        记录实际成功者；非 Routing 包装时注入即 SiliconFlow 本体）。
+        """
+        rr = self.reranker
+        if rr is None or not chunks:
+            return None
+        effective = getattr(rr, "last_used", rr)
+        if not isinstance(effective, SiliconFlowReranker):
+            return None
+        return float(chunks[0].score)
+
+    async def process(
+        self,
+        chunks: list[RetrievedChunk],
+        results: list[SearchChannelResult],
+        context: SearchContext,
+    ) -> list[RetrievedChunk]:
+        if not chunks:
+            return chunks
+        texts = [c.text for c in chunks]
+        bge_top1 = self._reusable_bge_top1(chunks)
+        gate_result = await asyncio.to_thread(
+            self.gate.gate,
+            context.main_question,
+            texts,
+            self.config.gate_bge_threshold,
+            self.config.gate_qwen3_threshold,
+            self.config.gate_top_n,
+            bge_scores=([bge_top1] if bge_top1 is not None else None),
+        )
+        if gate_result.error:
+            _logger.warning(
+                "相关性门控 fail-open（%s），放行 %d 条 chunk", gate_result.error, len(chunks)
+            )
+            return chunks
+        qwen3_disp = (
+            "skipped(惰性)" if gate_result.qwen3_top1 < 0 else f"{gate_result.qwen3_top1:.4f}"
+        )
+        _logger.info(
+            "相关性门控 - bge_top1=%.4f qwen3_top1=%s 阈值=(%.2f, %.2f) 触发=%s scored=%d "
+            "bge来源=%s",
+            gate_result.bge_top1, qwen3_disp,
+            self.config.gate_bge_threshold, self.config.gate_qwen3_threshold,
+            gate_result.triggered, gate_result.scored,
+            "复用rerank" if bge_top1 is not None else "独立打分",
+        )
+        if gate_result.triggered:
+            _logger.warning(
+                "相关性门控触发，切空 %d 条 chunk，走无知识拒答（题目: %s）",
+                len(chunks), context.main_question[:50],
+            )
+            return []
+        return chunks
+
+
+
+
 class MetadataEnrichmentPostProcessor:
     """1:1 翻译 ragent MetadataEnrichmentPostProcessor（order=20，context_enrich_enabled 时启用）。
 
@@ -481,12 +579,14 @@ class MultiChannelRetrievalEngine:
         reranker: Any | None = None,
         metadata_resolver: Any | None = None,
         post_processors: list[SearchResultPostProcessor] | None = None,
+        relevance_gate: Any | None = None,
     ):
         """channel_runners: 通道类型 -> 协程工厂(query, collections, top_k) -> list[RetrievedChunk]"""
         self.runners = channel_runners
         self.config = config or RetrievalConfig.default()
         self.reranker = reranker
         self.metadata_resolver = metadata_resolver
+        self.relevance_gate = relevance_gate
         self.post_processors = post_processors or self._default_post_processors()
 
     def _default_post_processors(self) -> list[SearchResultPostProcessor]:
@@ -494,6 +594,7 @@ class MultiChannelRetrievalEngine:
             DeduplicationPostProcessor(),
             FusionPostProcessor(self.config),
             RerankPostProcessor(self.reranker, self.config),
+            RelevanceGatePostProcessor(self.relevance_gate, self.config, self.reranker),
             MetadataEnrichmentPostProcessor(self.metadata_resolver, self.config),
         ]
 
@@ -505,15 +606,22 @@ class MultiChannelRetrievalEngine:
         *,
         scope: RetrievalScope | None = None,
         intents: list | None = None,
+        timing: dict | None = None,
     ) -> list[RetrievedChunk]:
         """兼容入口：返回后处理后的 chunk 列表（与旧调用方 agent.retriever.retrieve(...) 一致）。
 
         完整 Java 等价流程（含 KnowledgeRetrievalResult 与归因）见 _retrieve_knowledge_channels。
         scope / intents 为可选关键字参数：传入后引擎即可执行 1:1 的归因推导。
+        timing 为可选输出参数（并发安全：每次调用传独立 dict）：收回 RRF/Rerank/RelevanceGate
+        各段耗时（毫秒，键为 processor.name），供 TTFT 五段归因。
         """
         budget = budget or RetrievalBudget()
         context = self._build_search_context(query, budget, scope, intents, collections)
         result = await self._retrieve_knowledge_channels(context)
+        if timing is not None:
+            # 多子查询串行多次 retrieve：同名 processor 耗时累加（调用方传独立 dict，并发安全）
+            for rec in context.metadata.get("post_processors", []):
+                timing[rec["name"]] = round((timing.get(rec["name"]) or 0) + (rec.get("ms") or 0), 1)
         return result.chunks
 
     def _apply_graph_scope_quota(
@@ -581,6 +689,14 @@ class MultiChannelRetrievalEngine:
         attribution = derive_attribution(chunks, scope, context.intents)
         directed_ids = set(scope.node_ids) if (scope and scope.mode == "INTENT") else set()
         return KnowledgeRetrievalResult(chunks, attribution, directed_ids)
+
+    async def retrieve_debug(
+        self, context: SearchContext
+    ) -> tuple[list[SearchChannelResult], list[RetrievedChunk]]:
+        """诊断专用：通道明细 + 后置处理链中间态（经 context.metadata）+ 最终 chunks。"""
+        channel_results = await self._execute_search_channels(context)
+        chunks = await self._execute_post_processors(channel_results, context)
+        return channel_results, chunks
 
     async def _execute_search_channels(self, context: SearchContext) -> list[SearchChannelResult]:
         """1:1 翻译 ragent executeSearchChannels + withTimeout。
@@ -686,8 +802,13 @@ class MultiChannelRetrievalEngine:
         for processor in enabled:
             try:
                 before_size = len(chunks)
+                _pp_t0 = time.perf_counter()
                 chunks = await processor.process(chunks, results, context)
                 after_size = len(chunks)
+                context.metadata.setdefault("post_processors", []).append(
+                    {"name": processor.name, "before": before_size, "after": after_size,
+                     "ms": round((time.perf_counter() - _pp_t0) * 1000, 1)}
+                )
                 _logger.info(
                     "后置处理器 %s 完成 - 输入: %d 个 Chunk, 输出: %d 个 Chunk, 变化: %+d",
                     processor.name,

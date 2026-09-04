@@ -95,6 +95,7 @@ export type InvestigationSseEvent = {
   is_error?: boolean;
   report?: Record<string, unknown>;
   approvals?: ApprovalItem[];
+  actions?: CaseActionItem[];
   message?: string;
 };
 

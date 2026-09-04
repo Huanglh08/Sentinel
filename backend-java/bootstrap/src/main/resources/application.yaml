@@ -72,9 +72,9 @@ rag:
     type: pg  # 可选 milvus / pg
 
   keyword:
-    type: none  # 可选 none / es
+    type: es  # 可选 none / es
     es:
-      uris: http://127.0.0.1:9200
+      uris: http://localhost:9200  # Docker 容器 elasticsearch（sentinel-es:8.15.0-ik，随 start-sentinel.ps1 启动，IP 不再随 WSL 变化）
       index: rag_keyword_store  # 全库共享索引，按 collection_name 字段区分知识库
       analyzer: ik_max_word
       search-analyzer: ik_smart
@@ -97,6 +97,15 @@ rag:
 
   rerank:
     enabled: true
+    min-score: 0.2  # rerank 相关性低于阈值的 chunk 直接丢弃（0=不过滤）。实测：真实链路 rerank query 为 rewrite 子问题，分数整体右移（负样本也全 0.3+），纯阈值路线对负样本过度检索无效（回归 0 改善、recall -0.5pt 已回滚）；解法=下方双模型组合门控
+
+  retrieval-gate:  # P1 双模型 rerank 相关性门控（负样本治理）：bge-reranker-v2-m3 × Qwen3-Reranker-0.6B 对 Rerank 后 top chunks 打分，两模型 top1 同时低于阈值（AND，保守设计）才切空走无知识拒答；打分服务=agent-python /retrieval/rerank-gate，未启动/超时/异常一律 fail-open 放行
+    enabled: true  # 阈值由 agent-python eval/rerank_gate_eval.py 离线校准（打分对象与生产一致），下列为校准前先验值
+    url: ${SENTINEL_PYTHON_BASE_URL:http://localhost:8001}/retrieval/rerank-gate
+    timeout-ms: 5000
+    bge-threshold: 0.10
+    qwen3-threshold: 0.20  # 校准实测（rerank-gate-20260901-185423，99正/23负）：(0.10,0.20)=切空82.6%/误伤12.1%，同切空率下优于 0.40（误伤14.1%）
+    top-n: 8
 
   citation:
     enabled: true  # 回答行内引用角标 [N](#cite-N)：开启会动态追加引用规则并为资料注入编号，增加首字延迟；关闭不影响文档级来源面板
@@ -138,7 +147,7 @@ rag:
   search:
     # 检索漏斗三段预算，各自独立、单调收窄，启动时校验 recall-budget ≥ default-top-k 且 rerank-candidate-limit ≥ default-top-k
     default-top-k: 10           # ③ 最终进 LLM 的条数（产品语义的 topK）
-    recall-budget: 20           # ① 每通道召回条数（绝对值，向量意图路/关键词/图谱共用）；须 ≥ default-top-k，0=回退 default-top-k
+    recall-budget: 30           # ① 每通道召回条数（绝对值，向量意图路/关键词/图谱共用）；须 ≥ default-top-k，0=回退 default-top-k
     # 检索作用域：本次请求该看哪些知识库，与用什么模态检索无关，故与 channels 平级、三条通道共读
     # 判定只看 KB 意图最高分，不看意图个数；关掉任一通道都不影响其余通道的作用域
     scope:
@@ -150,7 +159,7 @@ rag:
       vector:
         enabled: true       # 向量通道总开关
       keyword:
-        enabled: false      # 检索范围读引擎解析好的作用域，与向量通道同源
+        enabled: true       # ES BM25 关键词通道（rag.keyword.type=es + WSL ES 就绪时开启）
       graph:
         enabled: false    # 图谱检索通道开关：false 不参与问答召回（后端仍在，后台可视化照常）；置 true 前需先开 rag.graph.type=lightrag
       web-search:

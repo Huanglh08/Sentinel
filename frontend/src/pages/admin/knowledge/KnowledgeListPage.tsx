@@ -212,12 +212,12 @@ export function KnowledgeListPage() {
   const getCollectionBadgeClass = (name?: string) => {
     const value = (name || "").toLowerCase();
     if (value.includes("biz")) {
-      return "border-blue-200 bg-blue-50 text-blue-700";
+      return "border-cyan-400/30 bg-cyan-400/10 text-cyan-300";
     }
     if (value.includes("group")) {
-      return "border-purple-200 bg-purple-50 text-purple-700";
+      return "border-purple-400/30 bg-purple-400/10 text-purple-300";
     }
-    return "border-slate-200 bg-slate-100 text-slate-600";
+    return "border-white/10 bg-white/[0.035] text-slate-300";
   };
 
   const handleRename = async () => {
@@ -282,7 +282,7 @@ export function KnowledgeListPage() {
             <div key={item.label} className="admin-stat-card">
               <div className="flex items-center gap-3">
                 <div className="admin-stat-icon">
-                  <Icon className="h-5 w-5" />
+                  <Icon className="h-5 w-5 text-cyan-300" />
                 </div>
                 <div>
                   <div className="admin-stat-label">{item.label}</div>

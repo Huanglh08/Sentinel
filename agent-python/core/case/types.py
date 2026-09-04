@@ -32,6 +32,19 @@ ACTION_STATUS_EXECUTED = "EXECUTED"
 AUDIT_OPERATION_APPROVE = "APPROVE"
 AUDIT_OPERATION_REJECT = "REJECT"
 AUDIT_OPERATION_CLOSE = "CLOSE"
+AUDIT_OPERATION_AUTO_APPROVE = "AUTO_APPROVE"  # L1 放权：高置信 benign 自动放行
+AUDIT_OPERATION_KB_DISTILL = "KB_DISTILL"  # 知识库飞轮：报告经验回写候选池
+# Phase 4：L2 置信阈值自动处置（业界依据：Vigil 置信 >=0.90 自动执行遏制，
+# HolmesGPT/Tracecat 动作分级 approval_required_tools —— 置信阈值 x 确定性动作白名单双闸门）
+AUDIT_OPERATION_L2_AUTO_APPROVE = "L2_AUTO_APPROVE"  # L2 放权：高置信恶意/可疑 + 低危动作白名单
+AUDIT_OPERATION_RULE_MINED = "RULE_MINED"  # Rule Miner：候选规则产出
+AUDIT_OPERATION_RULE_APPROVED = "RULE_APPROVED"  # 规则审核通过（HITL）
+AUDIT_OPERATION_RULE_REJECTED = "RULE_REJECTED"  # 规则审核驳回（HITL）
+
+# 规则候选状态机（Phase 4 Rule Miner）：PENDING -> (APPROVED | REJECTED)
+RULE_STATUS_PENDING = "PENDING"
+RULE_STATUS_APPROVED = "APPROVED"
+RULE_STATUS_REJECTED = "REJECTED"
 
 # 调查阶段
 PHASE_TRIAGE = "TRIAGE"
@@ -43,6 +56,13 @@ SEVERITY_BENIGN = "benign"
 SEVERITY_SUSPICIOUS = "suspicious"
 SEVERITY_MALICIOUS = "malicious"
 SEVERITY_INCONCLUSIVE = "inconclusive"
+
+# L2 自动处置允许的结论档位（benign 走 L1 放行；inconclusive 必须人工）
+L2_SEVERITY_SET = {SEVERITY_SUSPICIOUS, SEVERITY_MALICIOUS}
+# 高危动作硬黑名单（不可配置）：命中任一关键词的建议无条件留人工审批。
+# 业界依据：Tracecat 将 falcon.isolate_host 列为敏感动作必须审批 —— 金融风控
+# 误封/误冻的客诉与资金代价高于 SOC 隔离主机，取保守端（Vigil/Tracecat 光谱的保守侧）。
+L2_ACTION_DENYLIST = ("封禁", "冻结", "止付", "清退", "拦截", "拉黑", "关停", "下架")
 
 
 @dataclass
@@ -56,6 +76,7 @@ class EvidenceStep:
     tool_args: dict = field(default_factory=dict)
     observation: str = ""
     is_error: bool = False
+    injection_suspected: bool = False  # 工具观察值中检测到间接注入指令（已消毒，留痕审计）
     elapsed_ms: int = 0
     create_time: str = ""
 

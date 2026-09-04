@@ -34,14 +34,14 @@ export function LoginPage() {
   };
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center px-4">
+    <div className="login-page relative flex min-h-screen items-center justify-center px-4">
       <div
-        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+        className="login-page__grid absolute inset-0 bg-cover bg-center bg-no-repeat"
         style={{ backgroundImage: "url(/backgrounds/bg-1-grid.png)" }}
         aria-hidden="true"
       />
-      <div className="absolute inset-0 bg-slate-950/30" aria-hidden="true" />
-      <div className="relative z-10 w-full max-w-md rounded-3xl border border-white/50 bg-white/85 p-8 shadow-soft backdrop-blur-xl">
+      <div className="login-page__veil absolute inset-0" aria-hidden="true" />
+      <div className="login-page__card relative z-10 w-full max-w-md rounded-3xl p-8">
         <div className="mb-6">
           <p className="font-display text-2xl font-semibold">欢迎回来</p>
           <p className="mt-1 text-sm text-muted-foreground">

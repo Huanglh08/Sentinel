@@ -31,6 +31,11 @@ from pathlib import Path
 
 import httpx
 
+# 支持脚本方式运行: python eval\retrieval_eval.py（把 agent-python 目录加入 sys.path）
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 
 # ---------- 鉴权 ----------
 
@@ -82,9 +87,12 @@ class RetrievalEvalSummary:
     total: int
     successful: int
     failed: int
+    positive_total: int
+    negative_total: int
     recall_at_5: float
     hit_rate_at_5: float
     mrr: float
+    negative_retrieval_rate: float
     latency_p50: float
     latency_p90: float
     latency_p95: float
@@ -99,7 +107,7 @@ def load_seeds(path: Path) -> list[RetrievalSeedCase]:
     if not path.exists():
         raise FileNotFoundError(f"seed 文件不存在:{path}")
     out: list[RetrievalSeedCase] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
         line = line.strip()
         if not line:
             continue
@@ -120,12 +128,15 @@ def load_seeds(path: Path) -> list[RetrievalSeedCase]:
 
 
 def _score_case(expected: list[str], retrieved: list[str], k: int = 5) -> tuple[float, bool, float]:
-    """返回 (recall@k, hit@k, reciprocal_rank)。"""
+    """返回 (recall@k, hit@k, reciprocal_rank)。
+
+    expected 为空（负样本,库中本无相关信息）时返回 0 值:
+    聚合时负样本不参与 Recall/MRR 统计,单独计 negative_retrieval_rate。
+    """
     top_k = retrieved[:k]
     expected_set = set(expected)
     if not expected_set:
-        # 无标注时视为命中（不参与召回统计）
-        return 1.0, True, 1.0
+        return 0.0, False, 0.0
     hits = len(expected_set & set(top_k))
     recall = hits / len(expected_set)
     hit = hits > 0
@@ -145,8 +156,11 @@ async def _eval_one(
     base_url: str,
     case: RetrievalSeedCase,
     timeout: float,
+    rewrite: bool = False,
 ) -> RetrievalCaseResult:
     url = f"{base_url.rstrip('/')}?question={urllib.parse.quote(case.q)}"
+    if rewrite:
+        url += "&rewrite=true"
     t0 = time.perf_counter()
     try:
         resp = await client.get(url, timeout=timeout)
@@ -224,6 +238,7 @@ async def _run(
     timeout: float,
     username: str,
     password: str,
+    rewrite: bool = False,
 ) -> RetrievalEvalSummary:
     sem = asyncio.Semaphore(concurrency)
     results: list[RetrievalCaseResult] = []
@@ -233,13 +248,16 @@ async def _run(
     api_base = f"{parsed.scheme}://{parsed.netloc}"
 
     async with httpx.AsyncClient() as client:
-        token = await login(client, api_base, username, password)
-        print(f"[retrieval_eval] 登录成功,token={token[:8]}***", file=sys.stderr)
-        client.headers["Authorization"] = token
+        try:
+            token = await login(client, api_base, username, password)
+            print(f"[retrieval_eval] 登录成功,token={token[:8]}***", file=sys.stderr)
+            client.headers["Authorization"] = token
+        except Exception as exc:  # noqa: BLE001
+            print(f"[retrieval_eval] 登录跳过(直连无鉴权诊断端点): {exc}", file=sys.stderr)
 
         async def _one(c: RetrievalSeedCase) -> RetrievalCaseResult:
             async with sem:
-                return await _eval_one(client, base_url, c, timeout)
+                return await _eval_one(client, base_url, c, timeout, rewrite)
 
         tasks = [asyncio.create_task(_one(c)) for c in seeds]
         for i, coro in enumerate(asyncio.as_completed(tasks), 1):
@@ -254,6 +272,8 @@ async def _run(
 
     successful = [r for r in results if r.error is None]
     failed = [r for r in results if r.error is not None]
+    positive = [r for r in successful if r.expected_doc_ids]
+    negative = [r for r in successful if not r.expected_doc_ids]
     latencies = sorted([r.latency_ms for r in successful])
 
     def _pct(p: float) -> float:
@@ -262,13 +282,17 @@ async def _run(
         idx = max(0, min(len(latencies) - 1, int(round((p / 100.0) * (len(latencies) - 1)))))
         return round(latencies[idx], 2)
 
+    neg_retrieved = sum(1 for r in negative if r.top5_doc_ids)
     return RetrievalEvalSummary(
         total=len(results),
         successful=len(successful),
         failed=len(failed),
-        recall_at_5=round(statistics.mean([r.recall_at_5 for r in successful]), 4) if successful else 0.0,
-        hit_rate_at_5=round(sum(1 for r in successful if r.hit_at_5) / len(successful), 4) if successful else 0.0,
-        mrr=round(statistics.mean([r.reciprocal_rank for r in successful]), 4) if successful else 0.0,
+        positive_total=len(positive),
+        negative_total=len(negative),
+        recall_at_5=round(statistics.mean([r.recall_at_5 for r in positive]), 4) if positive else 0.0,
+        hit_rate_at_5=round(sum(1 for r in positive if r.hit_at_5) / len(positive), 4) if positive else 0.0,
+        mrr=round(statistics.mean([r.reciprocal_rank for r in positive]), 4) if positive else 0.0,
+        negative_retrieval_rate=round(neg_retrieved / len(negative), 4) if negative else 0.0,
         latency_p50=_pct(50),
         latency_p90=_pct(90),
         latency_p95=_pct(95),
@@ -285,8 +309,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="基于 Java EvalController 的检索质量评测")
     parser.add_argument(
         "--eval-url",
-        default="http://localhost:9090/api/sentinel/rag/eval",
-        help="Java 端 EvalController 的 URL",
+        default="http://localhost:8001/debug/retrieval",
+        help="检索评测端点（默认 agent-python 诊断端点；亦可指向 9090 Java EvalController）",
     )
     parser.add_argument("--seed", default=str(default_seed), help="seed jsonl 路径")
     parser.add_argument("--output", default=str(default_output), help="报告输出目录")
@@ -295,12 +319,19 @@ def main() -> int:
     parser.add_argument("--name", default="retrieval", help="报告名前缀")
     parser.add_argument("--username", default="admin", help="网关登录用户名")
     parser.add_argument("--password", default="admin", help="网关登录密码")
+    parser.add_argument(
+        "--rewrite",
+        action="store_true",
+        help="评测前先过 QueryRewriter（对齐生产链路口径，每条 +1 次 LLM 调用）",
+    )
     args = parser.parse_args()
 
     seeds = load_seeds(Path(args.seed))
     print(f"[retrieval_eval] 加载 {len(seeds)} 条 seed from {args.seed}", file=sys.stderr)
 
-    summary = asyncio.run(_run(args.eval_url, seeds, args.concurrency, args.timeout, args.username, args.password))
+    summary = asyncio.run(
+        _run(args.eval_url, seeds, args.concurrency, args.timeout, args.username, args.password, args.rewrite)
+    )
 
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -319,7 +350,7 @@ def main() -> int:
     )
     print(f"[retrieval_eval] JSON 报告:{json_path}", file=sys.stderr)
 
-    from eval.report_renderer import render_retrieval_report
+    from eval.report_renderer import render_retrieval_report  # noqa: PLC0415
 
     md_path = output_dir / f"{args.name}-{timestamp}.md"
     md_path.write_text(

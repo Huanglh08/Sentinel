@@ -23,6 +23,8 @@ import { AgentProfilePage } from "@/pages/admin/agents/AgentProfilePage";
 import { AgentPromptPage } from "@/pages/admin/agents/AgentPromptPage";
 import { UserListPage } from "@/pages/admin/users/UserListPage";
 import { CaseInvestigationPage } from "@/pages/admin/case-investigation/CaseInvestigationPage";
+import { RagTracePage } from "@/pages/admin/traces/RagTracePage";
+import { RagTraceDetailPage } from "@/pages/admin/traces/RagTraceDetailPage";
 import { useAuthStore } from "@/stores/authStore";
 
 function RequireAuth({ children }: { children: JSX.Element }) {
@@ -185,6 +187,14 @@ export const router = createBrowserRouter([
       {
         path: "case-investigation",
         element: <CaseInvestigationPage />
+      },
+      {
+        path: "traces",
+        element: <RagTracePage />
+      },
+      {
+        path: "traces/:traceId",
+        element: <RagTraceDetailPage />
       }
     ]
   },

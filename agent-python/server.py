@@ -8,6 +8,12 @@ import tempfile
 import threading
 import time
 import uuid
+
+# 必须先于任何 os.getenv / from_env()：pydantic-settings 读 .env 不注入 os.environ，
+# 裸读 os.environ 的配置（如 RAG_SEARCH_CHANNELS_KEYWORD_ENABLED、RAG_KEYWORD_CHANNEL_ENABLED）会静默失效
+from dotenv import load_dotenv
+
+load_dotenv()
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -23,7 +29,16 @@ from pydantic import BaseModel, Field
 from core.agent import Agent
 from core.case import CaseInvestigationAgent
 from core.case.notify import notify_approval_decided
-from core.case.types import AUDIT_OPERATION_APPROVE, AUDIT_OPERATION_REJECT
+from core.case.patrol import CasePatroller
+from core.case.responder import CaseResponder
+from core.case.rule_miner import RuleMiner
+from core.case.store import CaseStore
+from core.case.types import (
+    AUDIT_OPERATION_APPROVE,
+    AUDIT_OPERATION_REJECT,
+    AUDIT_OPERATION_RULE_APPROVED,
+    AUDIT_OPERATION_RULE_REJECTED,
+)
 from core.chunk.chunker import chunk_file
 from core.config import AppSettings, RAGConfigProperties, SearchChannelProperties
 from core.embedding import EmbeddingConfig, ModelHealthStore as EmbeddingHealthStore, ModelRoutingExecutor as EmbeddingRoutingExecutor, RoutingEmbeddingService
@@ -49,7 +64,9 @@ from core.intent.service import InMemoryIntentTreeService
 from core.intent import IntentResolver
 from core.retrieval.engine import ChannelConfig, MultiChannelRetrievalEngine, RetrievalConfig
 from core.retrieval.external_channels import LightRagBackend, LightRagConfig, YouComWebSearchBackend, WebSearchConfig
-from core.retrieval.rerank import CrossEncoderReranker, LLMReranker, RoutingReranker
+from core.retrieval.rerank import SiliconFlowReranker, LLMReranker, RoutingReranker
+from core.retrieval.rerank_gate import GateResult, get_default_gate
+from core.retrieval.scope_resolver import RetrievalScope
 from core.retrieval.types import ChannelType, RetrievedChunk, RetrievalBudget
 from core.security import SecurityService, get_current_user, get_security_service, get_settings
 from core.tracing import Tracer
@@ -174,7 +191,24 @@ async def lifespan(application: FastAPI):
     memory_store = JdbcConversationMemoryStore(repo=memory_repo)
     application.state.memory_service = DefaultConversationMemoryService(store=memory_store)
     refresh_runtime_components(application)
+    # Phase 4: 定时巡检批处理（确定性调度与 Agent 分离；默认关闭 CASE_PATROL_INTERVAL<=0）
+    try:
+        _patrol_interval = float(os.getenv("CASE_PATROL_INTERVAL", "0").strip() or "0")
+    except ValueError:
+        _patrol_interval = 0.0
+    application.state.case_patroller = None
+    if _patrol_interval > 0:
+        patroller = CasePatroller(
+            # Agent 懒加载工厂：首个请求后才可用，巡检轮次运行时解析
+            case_agent=lambda: getattr(application.state, "case_agent", None),
+            store=CaseStore(),
+        )
+        if patroller.start():
+            application.state.case_patroller = patroller
     yield
+    _patroller = getattr(application.state, "case_patroller", None)
+    if _patroller is not None:
+        _patroller.shutdown()
     redis_client = getattr(application.state, "intent_redis", None)
     if redis_client is not None:
         try:
@@ -244,6 +278,7 @@ def _build_retrieval_engine(application: FastAPI) -> tuple[MultiChannelRetrieval
             routing=application.state.embedding_service,
             config=application.state.embedding_config,
         )
+        application.state.pg_backend = pg
     except Exception as exc:
         _logger.warning("pgvector 检索后端初始化失败，检索降级为空: %s", exc)
         return None
@@ -255,6 +290,7 @@ def _build_retrieval_engine(application: FastAPI) -> tuple[MultiChannelRetrieval
         return await pg.retrieve_keyword(query, collections, top_k)
 
     search_config = application.state.search_channel_config
+    rag_config = getattr(application.state, "rag_config", None) or RAGConfigProperties.from_env()
     channels = {
         ChannelType.VECTOR: vector_runner,
         ChannelType.KEYWORD: keyword_runner,
@@ -310,12 +346,22 @@ def _build_retrieval_engine(application: FastAPI) -> tuple[MultiChannelRetrieval
         rerank_enabled=search_config.fusion.rerank_candidate_limit > 0,
         supplement_ratio=search_config.scope.supplement_ratio,
         channel_timeout_ms=timeout_ms,
+        gate_enabled=rag_config.gate_enabled,
+        gate_bge_threshold=rag_config.gate_bge_threshold,
+        gate_qwen3_threshold=rag_config.gate_qwen3_threshold,
+        gate_top_n=rag_config.gate_top_n,
     )
     reranker = RoutingReranker([
-        CrossEncoderReranker(),
+        SiliconFlowReranker(),
         LLMReranker(_build_llm_service()),
     ])
-    return MultiChannelRetrievalEngine(channels, retrieval_config, reranker=reranker), pg
+    relevance_gate = get_default_gate() if rag_config.gate_enabled else None
+    return (
+        MultiChannelRetrievalEngine(
+            channels, retrieval_config, reranker=reranker, relevance_gate=relevance_gate
+        ),
+        pg,
+    )
 
 
 def _build_intent_resolver(llm: Any) -> tuple[Any, IntentTreeCacheManager, Any | None]:
@@ -526,9 +572,15 @@ def refresh_runtime_components(application: FastAPI) -> None:
             search_channel_config=application.state.search_channel_config,
         )
     else:
+        from core.rewrite import QueryRewriter
+
+        # 文档域感知 rewrite：口语句对齐知识库术语后才能过 RelevanceGate（gate 双低切空）
+        pg = getattr(application.state, "pg_backend", None)
+        rewriter = QueryRewriter(llm_service, doc_domains=pg.list_doc_names() if pg else None)
         application.state.agent = Agent(
             llm_service,
             retriever=retrieval_engine,
+            rewriter=rewriter,
             intent_resolver=application.state.intent_resolver,
             doc_meta_provider=doc_meta_provider,
             rag_config=application.state.rag_config,
@@ -625,6 +677,33 @@ async def health(settings: AppSettings = Depends(get_settings)):
     }
 
 
+@app.post("/retrieval/rerank-gate")
+async def rerank_gate(payload: dict[str, Any]):
+    """双模型 rerank 相关性门控打分（P1 负样本治理）。
+
+    供 Java 网关（RerankPostProcessor 之后的 RelevanceGatePostProcessor）内部调用；
+    进程内链路（Python agent 检索引擎）经 engine.py 直接使用 DualRerankGate。
+
+    请求: {"question": str, "texts": [str], "bge_threshold"?: float,
+           "qwen3_threshold"?: float, "top_n"?: int}
+    响应: GateResult.to_dict()；模型缺失/推理失败时 triggered=false + error（fail-open）。
+    """
+    question = str(payload.get("question") or "").strip()
+    texts = [str(t) for t in (payload.get("texts") or []) if t]
+    if not question or not texts:
+        return GateResult(triggered=False, error="question/texts required").to_dict()
+    gate = get_default_gate()
+    kwargs: dict[str, Any] = {}
+    if payload.get("bge_threshold"):
+        kwargs["bge_threshold"] = float(payload["bge_threshold"])
+    if payload.get("qwen3_threshold"):
+        kwargs["qwen3_threshold"] = float(payload["qwen3_threshold"])
+    if payload.get("top_n"):
+        kwargs["top_n"] = int(payload["top_n"])
+    result = await asyncio.to_thread(gate.gate, question, texts, **kwargs)
+    return result.to_dict()
+
+
 def _probe_redis(client: Any) -> dict[str, Any]:
     if client is None:
         return {"status": "DOWN", "detail": "not configured"}
@@ -715,9 +794,115 @@ def _get_case_agent(request: Request) -> CaseInvestigationAgent:
     case_agent = getattr(request.app.state, "case_agent", None)
     if case_agent is None:
         main_agent: Agent = request.app.state.agent
-        case_agent = CaseInvestigationAgent(main_agent.llm, main_agent.mcp)
+        # Phase 4: 注入 Responder（L2 自动处置的受控执行器；未注入时 L2 自动禁用）
+        case_agent = CaseInvestigationAgent(main_agent.llm, main_agent.mcp, responder=_get_case_responder(request))
         request.app.state.case_agent = case_agent
     return case_agent
+
+
+def _get_case_store(request: Request) -> CaseStore:
+    """案件存储（复用调查 Agent 的 store 实例，保证内存降级模式一致性）。"""
+    return _get_case_agent(request).store
+
+
+def _get_rule_miner(request: Request) -> RuleMiner:
+    """懒加载 RuleMiner（Phase 4）：复用调查 Agent 的 llm/GitOps 槽位。"""
+    miner = getattr(request.app.state, "case_rule_miner", None)
+    if miner is None:
+        miner = RuleMiner(_get_case_agent(request), _get_case_store(request))
+        request.app.state.case_rule_miner = miner
+    return miner
+
+
+def _get_case_patroller(request: Request) -> CasePatroller:
+    """懒加载巡检器（Phase 4）：优先复用 lifespan 装配的调度实例。"""
+    patroller = getattr(request.app.state, "case_patroller", None)
+    if patroller is None:
+        patroller = CasePatroller(_get_case_agent(request), _get_case_store(request))
+        request.app.state.case_patroller = patroller
+    return patroller
+
+
+def _get_case_responder(request: Request) -> CaseResponder:
+    """懒加载 Responder 执行器（P3）：与调查 Agent 共享 mcp 实例。"""
+    responder = getattr(request.app.state, "case_responder", None)
+    if responder is None:
+        main_agent: Agent = request.app.state.agent
+        responder = CaseResponder(main_agent.mcp)
+        request.app.state.case_responder = responder
+    return responder
+
+
+# ---------------- Phase 4: Rule Miner 规则工厂（蒸馏 -> 回放验证 -> HITL 审核 -> 回注分诊） ----------------
+
+
+class RuleMineRequest(BaseModel):
+    limit: int = Field(default=10, ge=1, le=50, description="消费蒸馏池记录数上限")
+
+
+class RuleReviewRequest(BaseModel):
+    decision: str = Field(pattern="^(APPROVED|REJECTED)$", description="审核结论")
+    opinion: str = Field(default="", max_length=512, description="审核意见")
+
+
+class PatrolRunRequest(BaseModel):
+    clues: list[str] | None = Field(default=None, max_length=10, description="手动线索（测试/演示用）")
+
+
+@app.get("/case/rules/candidates")
+async def case_rule_candidates(request: Request, status: str = "", limit: int = 100, user=Depends(get_current_user)):
+    """候选规则列表（PENDING/APPROVED/REJECTED，管理端审核视角）。"""
+    store = _get_case_store(request)
+    items = store.list_rule_candidates(status=status.strip().upper(), limit=max(1, min(limit, 200)))
+    return {"success": True, "items": items, "total": len(items)}
+
+
+@app.post("/case/rules/candidates/mine")
+async def case_rule_mine(payload: RuleMineRequest, request: Request, user=Depends(get_current_user)):
+    """手动触发 Rule Miner：消费蒸馏池 -> LLM 蒸馏 -> 候选规则落库（PENDING）。
+
+    护栏：condition_hash 去重、高危动作拦截、批次审计（RULE_MINED）。
+    """
+    operator = str(getattr(user, "username", None) or "rule_miner")
+    result = await _get_rule_miner(request).mine(limit=payload.limit, operator=operator)
+    return {"success": True, **result}
+
+
+@app.post("/case/rules/candidates/{rule_id}/review")
+async def case_rule_review(rule_id: str, payload: RuleReviewRequest, request: Request, user=Depends(get_current_user)):
+    """候选规则 HITL 审核（first_time 幂等）：APPROVED 后规则回注分诊（__RULE_HINTS__）。"""
+    store = _get_case_store(request)
+    operator = str(getattr(user, "username", None) or "unknown")
+    item = store.review_rule_candidate(
+        rule_id, status=payload.decision, operator=operator, opinion=payload.opinion
+    )
+    if item is None:
+        raise HTTPException(status_code=404, detail="规则候选不存在")
+    first_time = bool(item.pop("first_time", False))
+    if first_time:
+        operation = AUDIT_OPERATION_RULE_APPROVED if payload.decision == "APPROVED" else AUDIT_OPERATION_RULE_REJECTED
+        store.record_audit(
+            case_id="",
+            operation=operation,
+            target=rule_id,
+            operator=operator,
+            detail=f"规则[{item.get('rule_name', '')}]审核 {payload.decision}: {payload.opinion}"[:512],
+        )
+    return {"success": True, "first_time": first_time, "rule": item}
+
+
+@app.post("/case/rules/candidates/{rule_id}/validate")
+async def case_rule_validate(rule_id: str, request: Request, sample: int = 50, user=Depends(get_current_user)):
+    """历史案件回放验证（检测工程 Agent「合成遥测验证」的 Sentinel 对应物）。"""
+    result = await _get_rule_miner(request).validate(rule_id, sample_size=sample)
+    return {"success": True, **result}
+
+
+@app.post("/case/patrol/run")
+async def case_patrol_run(payload: PatrolRunRequest, request: Request, user=Depends(get_current_user)):
+    """手动触发一轮巡检（调度器之外的管理入口；指纹幂等 + 单批上限护栏与调度模式一致）。"""
+    result = await _get_case_patroller(request).patrol_once(clues_override=payload.clues)
+    return {"success": bool(result.get("started")), **result}
 
 
 @app.post("/case/investigate")
@@ -802,15 +987,42 @@ async def approval_decide(
             detail=f"{payload.decision} {result.get('action', '')}｜意见: {payload.opinion[:100]}",
         )
         if payload.decision == "APPROVED":
+            # P3 Responder：审批通过后受控执行（online 真调用 / offline 留痕）
+            item = {"action": result.get("action", ""), "reason": result.get("reason", "")}
+            outcome = await _get_case_responder(request).execute(item, result)
             case_agent.store.create_actions(
                 result.get("case_id", ""),
                 result.get("case_no", ""),
                 approval_id,
-                [{"action": result.get("action", ""), "detail": result.get("reason", "")}],
+                [
+                    {
+                        "action": item["action"],
+                        "detail": f"{item['reason']}｜{outcome['detail']}",
+                    }
+                ],
                 operator=operator,
             )
         notify_approval_decided(result, payload.decision, operator, payload.opinion)
     return result
+
+
+@app.get("/case/kb/distillations")
+async def kb_distillation_list(
+    request: Request,
+    user=Depends(get_current_user),
+    conclusion: str = "",
+    limit: int = 100,
+):
+    """知识库飞轮候选池列表（P3）：案件报告经验沉淀，供 Rule Miner/知识入库消费。
+
+    注意：必须定义在 GET /case/{case_id} 之前（FastAPI 按注册顺序匹配）。
+    """
+    case_agent = _get_case_agent(request)
+    return {
+        "distillations": case_agent.store.list_kb_distillations(
+            conclusion=conclusion, limit=min(max(limit, 1), 200)
+        )
+    }
 
 
 @app.get("/case/{case_id}")
@@ -828,12 +1040,17 @@ async def case_detail(case_id: str, request: Request, user=Depends(get_current_u
 
 @app.post("/case/{case_id}/close")
 async def case_close(case_id: str, request: Request, user=Depends(get_current_user)):
-    """归档关闭案件（P3-3）：REPORTED/INVESTIGATING -> CLOSED，重复关闭幂等。"""
+    """归档关闭案件（P3-3）：REPORTED/INVESTIGATING -> CLOSED，重复关闭幂等。
+
+    归档成功时触发知识库飞轮：报告 knowledge_distillation 回写候选池（幂等）。
+    """
     case_agent = _get_case_agent(request)
     operator = _require_case_operator(user)
     result = case_agent.store.close_case(case_id, operator=operator)
     if result is None:
         raise HTTPException(status_code=404, detail="case not found")
+    if result.get("closed"):
+        result["kb_distillation"] = case_agent.store.distill_knowledge(case_id, operator=operator)
     return result
 
 
@@ -1011,8 +1228,11 @@ async def chat(payload: ChatRequest, request: Request, user=Depends(get_current_
             ),
         )
 
-        # 等待限流结果
-        wait_tasks = [acquired.wait(), rejected.wait()]
+        # 等待限流结果（Python 3.11+ asyncio.wait 禁止传裸 coroutine，必须包 Task）
+        wait_tasks = [
+            asyncio.ensure_future(acquired.wait()),
+            asyncio.ensure_future(rejected.wait()),
+        ]
         done, pending = await asyncio.wait(wait_tasks, return_when=asyncio.FIRST_COMPLETED)
         for t in pending:
             t.cancel()
@@ -1080,7 +1300,7 @@ async def chat(payload: ChatRequest, request: Request, user=Depends(get_current_
                     for s in sources
                 ]
                 yield f"event: sources\ndata: {json.dumps({'sources': sources, 'grounding_chunks': grounding_chunks}, ensure_ascii=False)}\n\n"
-                yield f"event: complete\ndata: {json.dumps({'full_text': full_text, 'sources': sources, 'grounding_chunks': grounding_chunks}, ensure_ascii=False)}\n\n"
+                yield f"event: complete\ndata: {json.dumps({'full_text': full_text, 'sources': sources, 'grounding_chunks': grounding_chunks, 'ttft_breakdown': scope.get('_ttft_breakdown')}, ensure_ascii=False)}\n\n"
                 yield f"event: end\ndata: {json.dumps({'status': 'done', 'request_id': request_id}, ensure_ascii=False)}\n\n"
                 # Assistant persistence is handled by the Java gateway; no double write here.
         except asyncio.CancelledError:
@@ -1217,6 +1437,93 @@ async def search(payload: SearchRequest, request: Request, user=Depends(get_curr
         budget=budget,
     )
     return {"query": payload.query, "results": [result.to_dict() for result in results]}
+
+
+@app.post("/debug/retrieval")
+@app.get("/debug/retrieval")
+async def debug_retrieval(request: Request, question: str = "", payload: SearchRequest | None = None, rewrite: bool = False):
+    # ponytail: 内网诊断专用端点（无鉴权），仅供 eval/诊断脚本直连，勿暴露公网。
+    ensure_runtime_state(request.app)
+    if request.app.state.retrieval_engine is None:
+        refresh_runtime_components(request.app)
+    engine = request.app.state.retrieval_engine
+    q = question or (payload.query if payload else "")
+    if engine is None or not q.strip():
+        return {"query": q, "rewritten_query": q, "channels": [], "post_processors": [], "final": [], "retrievedDocIds": []}
+    # 对齐生产链路口径：口语场景句直接检索会被 RelevanceGate 误切空，生产先过 QueryRewriter；
+    # 且生产保留原句为第一路（agent.py 双路融合消改写方差）、各子查询独立检索后拼接，此处同口径。
+    queries = [q]
+    if rewrite:
+        rr = await request.app.state.agent.rewriter.rewrite(q)
+        queries += [x for x in rr.queries if x and x != q]
+    rewritten = queries[1] if len(queries) > 1 else q
+    budget = RetrievalBudget(recall_budget=10, candidate_limit=20, context_top_k=8)
+    # pgvector 语义：空 collections = 零召回；诊断未指定范围时取全库 distinct collection
+    pg_backend = getattr(request.app.state, "pg_backend", None)
+    collections = pg_backend.list_collections() if pg_backend else []
+    scope = RetrievalScope(mode="GLOBAL", collections=collections)
+    started = time.perf_counter()
+    channel_results = []
+    seen: dict[str, object] = {}
+    per_query_processors = []
+    for query in queries:
+        context = engine._build_search_context(query, budget, scope, None, None)
+        cr, chs = await engine.retrieve_debug(context)
+        channel_results.extend(cr)
+        per_query_processors.append({"query": query, "processors": context.metadata.get("post_processors", [])})
+        for c in chs:
+            prev = seen.get(c.id)
+            if prev is None or c.score > prev.score:
+                seen[c.id] = c
+    chunks = sorted(seen.values(), key=lambda c: -c.score)[:6]
+    total_ms = (time.perf_counter() - started) * 1000.0
+    # metadata jsonb 缺 doc_name 时 pgvector 召回回退 str(doc_id)；此处回表补真实文档名
+    # ponytail: 逐条查询 O(n)，诊断端点 n=6 可接受；生产链路应由入库时写全 metadata 解决
+    for c in chunks:
+        if (not c.doc_name or c.doc_name == c.doc_id) and pg_backend:
+            real = pg_backend.get_doc(c.doc_id).get("doc_name")
+            if real:
+                c.doc_name = real
+    # 诊断字段：本次查询实际使用的 embedding 模型（降级链排查用；retrieve 已 embed，此处走缓存）
+    embed_info = "n/a"
+    if pg_backend:
+        er = pg_backend.routing.embed_batch([rewritten])
+        embed_info = f"{er.provider}:{er.model_id}"
+    return {
+        "query": q,
+        "rewritten_query": rewritten,
+        "embed_model": embed_info,
+        "channels": [
+            {
+                "channel_type": r.channel_type.value,
+                "channel_name": r.channel_name,
+                "latency_ms": round(r.latency_ms, 1),
+                "n_chunks": len(r.chunks),
+                "chunks": [
+                    {
+                        "doc_id": c.doc_id,
+                        "doc_name": c.doc_name,
+                        "chunk_id": c.id,
+                        "score": round(c.score, 4),
+                        "preview": (c.text or "")[:80],
+                    }
+                    for c in r.chunks[:10]
+                ],
+            }
+            for r in channel_results
+        ],
+        "post_processors": per_query_processors,
+        "final": [c.to_dict() for c in chunks],
+        # 对齐 Java EvalController 语义：doc_name 剥文件后缀作为业务 docId，与 seed expected_doc_ids 同名
+        "retrievedDocIds": sorted(
+            {
+                (n.rsplit(".", 1)[0] if n.rfind(".") > 0 else n)
+                for c in chunks
+                if (n := c.doc_name)
+            }
+        ),
+        "total_ms": round(total_ms, 1),
+    }
 
 
 @app.post("/upload")

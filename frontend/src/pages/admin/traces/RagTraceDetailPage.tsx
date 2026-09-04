@@ -560,8 +560,8 @@ export function RagTraceDetailPage() {
 
   if (!traceId || !selectedRun) {
     return (
-        <div className="space-y-6">
-          <div className="flex items-center justify-between">
+        <div className="admin-trace-detail space-y-6">
+          <div className="admin-page-header flex items-center justify-between">
             <div className="flex items-center gap-1.5 text-sm">
               <Link to="/admin/traces" className="text-slate-500 hover:text-slate-700">
                 链路追踪
@@ -592,9 +592,9 @@ export function RagTraceDetailPage() {
   }
 
   return (
-      <div className="space-y-4 pb-8">
+      <div className="admin-trace-detail space-y-4 pb-8">
         {/* 标题栏 */}
-        <div className="flex items-center justify-between">
+        <div className="admin-page-header flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-1.5 text-sm">
               <Link
@@ -742,14 +742,14 @@ export function RagTraceDetailPage() {
                 </div>
             ) : (
                 <div>
-                  <div className="grid grid-cols-[minmax(180px,1fr)_120px_2fr_100px] gap-4 px-4 py-2 text-xs font-medium text-slate-500 bg-slate-50 border-y border-slate-100">
+                  <div className="grid grid-cols-[minmax(180px,1fr)_120px_2fr_100px] gap-4 px-4 py-2 text-xs font-medium text-slate-500 bg-white/[0.04] border-y border-white/10">
                     <span>节点</span>
                     <span>类型</span>
                     <span>时间线</span>
                     <span className="text-right">耗时</span>
                   </div>
 
-                  <div className="grid grid-cols-[minmax(180px,1fr)_120px_2fr_100px] gap-4 px-4 bg-white">
+                  <div className="grid grid-cols-[minmax(180px,1fr)_120px_2fr_100px] gap-4 px-4 bg-white/[0.04]">
                     <div />
                     <div />
                     <TimeScale totalMs={timeline.totalWindowMs} />

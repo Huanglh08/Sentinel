@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sentinel 艺术字 · 弹跳版预览</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Titan+One&family=Concert+One&family=Rubik+Bubbles&family=Luckiest+Guy&family=Bungee&family=Alfa+Slab+One&family=Abril+Fatface&family=Shrikhand&family=Audiowide&family=Bebas+Neue&family=Righteous&display=swap" rel="stylesheet" />
+<style>
+:root{
+  --wm-size:72px;
+  --ff:"Fredoka","Segoe UI",sans-serif;
+  --amp:1;                 /* 弹跳幅度倍率 */
+  --gap:0s;                /* 逐字延迟间隔 */
+  --c1:#4F46E5; --c2:#7C3AED; --c3:#A855F7; --c4:#3B82F6;
+  --page:#070912;
+  --card:rgba(255,255,255,.045);
+  --bd:rgba(255,255,255,.09);
+  --txt:#e9ecf5; --dim:#98a0b8;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--page); color:var(--txt);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  -webkit-font-smoothing:antialiased; min-height:100vh; overflow-x:hidden;
+}
+body::before{
+  content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:
+    radial-gradient(900px 520px at 10% -10%, rgba(124,58,237,.30), transparent 60%),
+    radial-gradient(800px 460px at 90% 2%, rgba(59,130,246,.22), transparent 62%),
+    radial-gradient(700px 500px at 50% 112%, rgba(168,85,247,.16), transparent 60%);
+}
+.wrap{max-width:1200px;margin:0 auto;padding:34px 22px 90px}
+
+/* ---------- 顶栏 ---------- */
+.topbar{display:flex;flex-wrap:wrap;align-items:flex-end;gap:16px;justify-content:space-between;margin-bottom:22px}
+.title{font-size:25px;font-weight:700;letter-spacing:-.02em;margin:0 0 6px}
+.subtitle{margin:0;color:var(--dim);font-size:13px;line-height:1.7}
+.controls{display:flex;flex-wrap:wrap;align-items:center;gap:9px}
+.ctrl{
+  display:inline-flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--bd);
+  padding:8px 13px;border-radius:999px;font-size:12.5px;color:var(--txt);
+}
+select{
+  background:transparent;border:0;color:var(--txt);font-size:12.5px;font-family:inherit;
+  outline:none;cursor:pointer;max-width:170px;
+}
+select option{background:#151a2e;color:#e9ecf5}
+button.act{
+  border:1px solid var(--bd);background:var(--card);color:var(--txt);padding:8px 15px;
+  border-radius:999px;font-size:12.5px;cursor:pointer;font-family:inherit;transition:.2s;
+}
+button.act:hover{background:rgba(255,255,255,.13)}
+input[type=range]{accent-color:#a855f7;width:104px}
+
+/* ---------- 主舞台 ---------- */
+.hero{
+  position:relative;border-radius:22px;overflow:hidden;margin-bottom:16px;
+  border:1px solid var(--bd);background:#f7f8fc;
+  display:flex;align-items:center;justify-content:center;
+  min-height:250px;padding:40px 24px 48px;transition:.3s;
+}
+body[data-stage="dark"] .hero{background:#0d1020}
+.hero::before{
+  content:"";position:absolute;inset:0;opacity:.5;pointer-events:none;
+  background-image:linear-gradient(rgba(120,130,170,.12) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(120,130,170,.12) 1px,transparent 1px);
+  background-size:28px 28px;
+  mask-image:radial-gradient(circle at 50% 50%,#000 32%,transparent 76%);
+  -webkit-mask-image:radial-gradient(circle at 50% 50%,#000 32%,transparent 76%);
+}
+.hero-tag{
+  position:absolute;top:14px;left:18px;font-size:11.5px;color:var(--dim);
+  letter-spacing:.08em;text-transform:uppercase;
+}
+
+/* ---------- 卡片 / 画廊 ---------- */
+.grid{display:grid;gap:14px}
+.g-fonts{grid-template-columns:repeat(auto-fill,minmax(228px,1fr))}
+.g-bounce{grid-template-columns:repeat(auto-fill,minmax(248px,1fr))}
+.card{
+  background:var(--card);border:1px solid var(--bd);border-radius:16px;padding:14px;
+  transition:.22s;cursor:pointer;position:relative;
+}
+.card:hover{border-color:rgba(168,85,247,.45);background:rgba(255,255,255,.07)}
+.card.picked{border-color:rgba(168,85,247,.7);box-shadow:0 0 0 1px rgba(168,85,247,.35),0 16px 44px -24px rgba(124,58,237,.8)}
+.card .fname{font-size:12.5px;font-weight:600;margin:0 0 3px;display:flex;justify-content:space-between;align-items:center;gap:6px}
+.card .fname em{font-style:normal;font-size:10.5px;color:#a855f7;font-weight:500}
+.card .fdesc{font-size:11px;color:var(--dim);margin:0 0 10px;line-height:1.6}
+.mini{
+  background:#fbfcff;border-radius:10px;min-height:104px;
+  display:flex;align-items:center;justify-content:center;padding:22px 10px 26px;
+}
+body[data-stage="dark"] .mini{background:#0d1020}
+.card .pick{
+  margin-top:10px;width:100%;border:1px solid var(--bd);background:rgba(255,255,255,.05);
+  color:var(--txt);padding:6px;border-radius:8px;font-size:11.5px;cursor:pointer;font-family:inherit;transition:.2s;
+}
+.card .pick:hover{background:rgba(255,255,255,.13)}
+.card.picked .pick{background:linear-gradient(135deg,#7c3aed,#4f46e5);border-color:transparent;color:#fff}
+
+h2.sec{font-size:17px;font-weight:650;margin:40px 0 5px;letter-spacing:-.01em}
+p.secsub{color:var(--dim);font-size:12.8px;margin:0 0 15px;line-height:1.7}
+
+/* ================= 艺术字核心 ================= */
+.wm{
+  position:relative;display:inline-block;
+  font-family:var(--ff);
+  font-size:var(--wm-size);font-weight:700;line-height:1.15;
+  letter-spacing:.01em;white-space:nowrap;
+  padding-bottom:.12em;
+}
+.wm .ch{
+  position:relative;display:inline-block;
+  transform-origin:50% 88%;
+  will-change:transform;
+}
+.wm .ch-txt{
+  display:inline-block;
+  background-image:linear-gradient(115deg,var(--c1),var(--c2) 38%,var(--c3) 62%,var(--c4));
+  background-size:210% 100%;
+  -webkit-background-clip:text;background-clip:text;
+  -webkit-text-fill-color:transparent;color:transparent;
+  animation:flow 7s linear infinite;
+}
+@keyframes flow{from{background-position:0 50%}to{background-position:210% 50%}}
+/* 落地阴影 */
+.wm .ch-sh{
+  position:absolute;left:50%;bottom:-.06em;
+  width:.78em;height:.13em;border-radius:50%;
+  background:radial-gradient(ellipse at center,rgba(79,70,229,.45),rgba(79,70,229,0) 72%);
+  transform:translateX(-50%);pointer-events:none;
+}
+
+/* --- 弹跳 1：Squash & Stretch 完整弹跳（主推） --- */
+.b-squash .ch{animation:b-sq 2.4s infinite;animation-delay:calc(var(--i) * var(--gap))}
+.b-squash .ch-sh{animation:s-sq 2.4s infinite;animation-delay:calc(var(--i) * var(--gap))}
+@keyframes b-sq{
+  0%,52%,100%{transform:translateY(0) scale(1,1);animation-timing-function:ease-in-out}
+  56%{transform:translateY(calc(.05em * var(--amp))) scale(calc(1 + .14 * var(--amp)),calc(1 - .14 * var(--amp)));animation-timing-function:cubic-bezier(.2,.7,.4,1)}
+  63%{transform:translateY(calc(-.44em * var(--amp))) scale(calc(1 - .08 * var(--amp)),calc(1 + .12 * var(--amp)));animation-timing-function:cubic-bezier(.4,0,.6,1)}
+  71%{transform:translateY(calc(-.54em * var(--amp))) scale(1,1);animation-timing-function:cubic-bezier(.5,0,.7,.6)}
+  79%{transform:translateY(calc(-.07em * var(--amp))) scale(calc(1 - .05 * var(--amp)),calc(1 + .08 * var(--amp)));animation-timing-function:cubic-bezier(.3,0,.7,1)}
+  85%{transform:translateY(0) scale(calc(1 + .28 * var(--amp)),calc(1 - .26 * var(--amp)));animation-timing-function:cubic-bezier(.2,.9,.4,1)}
+  90%{transform:translateY(calc(-.12em * var(--amp))) scale(calc(1 - .03 * var(--amp)),calc(1 + .05 * var(--amp)));animation-timing-function:cubic-bezier(.4,0,.6,1)}
+  94%{transform:translateY(0) scale(calc(1 + .11 * var(--amp)),calc(1 - .09 * var(--amp)));animation-timing-function:ease-out}
+  97%{transform:translateY(0) scale(calc(1 + .03 * var(--amp)),calc(1 - .03 * var(--amp)))}
+}
+@keyframes s-sq{
+  0%,52%,100%{transform:translateX(-50%) scale(1);opacity:.45}
+  71%{transform:translateX(-50%) scale(calc(1 - .42 * var(--amp)));opacity:.14}
+  85%{transform:translateX(-50%) scale(calc(1 + .30 * var(--amp)));opacity:.55}
+  94%{transform:translateX(-50%) scale(calc(1 + .06 * var(--amp)));opacity:.48}
+}
+
+/* --- 弹跳 2：连续波浪（无停顿，最活泼） --- */
+.b-wave .ch{animation:b-wv 1.5s ease-in-out infinite;animation-delay:calc(var(--i) * var(--gap) * -1)}
+.b-wave .ch-sh{animation:s-wv 1.5s ease-in-out infinite;animation-delay:calc(var(--i) * var(--gap) * -1)}
+@keyframes b-wv{
+  0%,100%{transform:translateY(0) scale(1,1)}
+  22%{transform:translateY(calc(-.30em * var(--amp))) scale(calc(1 - .06 * var(--amp)),calc(1 + .09 * var(--amp)))}
+  45%{transform:translateY(0) scale(calc(1 + .09 * var(--amp)),calc(1 - .08 * var(--amp)))}
+  62%{transform:translateY(calc(-.09em * var(--amp))) scale(1,1)}
+  80%{transform:translateY(0) scale(calc(1 + .03 * var(--amp)),calc(1 - .03 * var(--amp)))}
+}
+@keyframes s-wv{
+  0%,100%{transform:translateX(-50%) scale(1);opacity:.45}
+  22%{transform:translateX(-50%) scale(calc(1 - .34 * var(--amp)));opacity:.16}
+  45%{transform:translateX(-50%) scale(calc(1 + .12 * var(--amp)));opacity:.5}
+}
+
+/* --- 弹跳 3：果冻 Q 弹（余震多、最软） --- */
+.b-jelly .ch{animation:b-jl 2.8s infinite;animation-delay:calc(var(--i) * var(--gap))}
+.b-jelly .ch-sh{animation:s-jl 2.8s infinite;animation-delay:calc(var(--i) * var(--gap))}
+@keyframes b-jl{
+  0%,48%,100%{transform:translateY(0) scale(1,1)}
+  53%{transform:translateY(calc(.07em * var(--amp))) scale(calc(1 + .20 * var(--amp)),calc(1 - .18 * var(--amp)))}
+  61%{transform:translateY(calc(-.58em * var(--amp))) scale(calc(1 - .11 * var(--amp)),calc(1 + .16 * var(--amp)))}
+  70%{transform:translateY(calc(-.10em * var(--amp))) scale(calc(1 - .02 * var(--amp)),calc(1 + .06 * var(--amp)))}
+  76%{transform:translateY(0) scale(calc(1 + .36 * var(--amp)),calc(1 - .30 * var(--amp)))}
+  81%{transform:translateY(calc(-.20em * var(--amp))) scale(calc(1 - .05 * var(--amp)),calc(1 + .09 * var(--amp)))}
+  86%{transform:translateY(0) scale(calc(1 + .22 * var(--amp)),calc(1 - .18 * var(--amp)))}
+  90%{transform:translateY(calc(-.08em * var(--amp))) scale(calc(1 - .02 * var(--amp)),calc(1 + .04 * var(--amp)))}
+  94%{transform:translateY(0) scale(calc(1 + .09 * var(--amp)),calc(1 - .07 * var(--amp)))}
+  97%{transform:translateY(0) scale(calc(1 - .03 * var(--amp)),calc(1 + .03 * var(--amp)))}
+}
+@keyframes s-jl{
+  0%,48%,100%{transform:translateX(-50%) scale(1);opacity:.45}
+  61%{transform:translateX(-50%) scale(calc(1 - .5 * var(--amp)));opacity:.12}
+  76%{transform:translateX(-50%) scale(calc(1 + .38 * var(--amp)));opacity:.6}
+  86%{transform:translateX(-50%) scale(calc(1 + .2 * var(--amp)));opacity:.52}
+  97%{transform:translateX(-50%) scale(calc(1 - .04 * var(--amp)));opacity:.4}
+}
+
+/* --- 弹跳 4：Pop 轻点（间隔长、最克制） --- */
+.b-pop .ch{animation:b-pp 3.2s infinite;animation-delay:calc(var(--i) * var(--gap))}
+.b-pop .ch-sh{animation:s-pp 3.2s infinite;animation-delay:calc(var(--i) * var(--gap))}
+@keyframes b-pp{
+  0%,26%,100%{transform:translateY(0) scale(1,1)}
+  30%{transform:translateY(calc(.06em * var(--amp))) scale(calc(1 + .18 * var(--amp)),calc(1 - .16 * var(--amp)))}
+  38%{transform:translateY(calc(-.46em * var(--amp))) scale(calc(1 - .09 * var(--amp)),calc(1 + .13 * var(--amp)))}
+  45%{transform:translateY(0) scale(calc(1 + .30 * var(--amp)),calc(1 - .26 * var(--amp)))}
+  51%{transform:translateY(calc(-.15em * var(--amp))) scale(calc(1 - .04 * var(--amp)),calc(1 + .06 * var(--amp)))}
+  57%{transform:translateY(0) scale(calc(1 + .13 * var(--amp)),calc(1 - .11 * var(--amp)))}
+  63%{transform:translateY(calc(-.04em * var(--amp))) scale(1,1)}
+  68%{transform:translateY(0) scale(1,1)}
+}
+@keyframes s-pp{
+  0%,26%,100%{transform:translateX(-50%) scale(1);opacity:.45}
+  38%{transform:translateX(-50%) scale(calc(1 - .44 * var(--amp)));opacity:.13}
+  45%{transform:translateX(-50%) scale(calc(1 + .32 * var(--amp)));opacity:.56}
+  57%{transform:translateX(-50%) scale(calc(1 + .08 * var(--amp)));opacity:.48}
+}
+
+/* --- 弹跳 5：Drop 掉落（入场感，弹两下后静止） --- */
+.b-drop .ch{animation:b-dp 3.6s infinite;animation-delay:calc(var(--i) * var(--gap))}
+.b-drop .ch-sh{animation:s-dp 3.6s infinite;animation-delay:calc(var(--i) * var(--gap))}
+@keyframes b-dp{
+  0%{transform:translateY(calc(-1.3em * var(--amp))) scale(calc(1 - .16 * var(--amp)),calc(1 + .22 * var(--amp)));opacity:0;animation-timing-function:cubic-bezier(.4,0,.9,.5)}
+  9%{transform:translateY(calc(-1.3em * var(--amp))) scale(calc(1 - .16 * var(--amp)),calc(1 + .22 * var(--amp)));opacity:0;animation-timing-function:cubic-bezier(.4,0,.9,.5)}
+  20%{transform:translateY(0) scale(calc(1 + .34 * var(--amp)),calc(1 - .28 * var(--amp)));opacity:1;animation-timing-function:cubic-bezier(.2,.8,.4,1)}
+  28%{transform:translateY(calc(-.42em * var(--amp))) scale(calc(1 - .08 * var(--amp)),calc(1 + .12 * var(--amp)));animation-timing-function:cubic-bezier(.4,0,.7,.8)}
+  35%{transform:translateY(0) scale(calc(1 + .22 * var(--amp)),calc(1 - .18 * var(--amp)));animation-timing-function:cubic-bezier(.2,.8,.4,1)}
+  41%{transform:translateY(calc(-.15em * var(--amp))) scale(calc(1 - .04 * var(--amp)),calc(1 + .06 * var(--amp)))}
+  47%{transform:translateY(0) scale(calc(1 + .08 * var(--amp)),calc(1 - .07 * var(--amp)))}
+  53%{transform:translateY(0) scale(1,1)}
+  88%{transform:translateY(0) scale(1,1);opacity:1}
+  96%{transform:translateY(calc(-.02em * var(--amp))) scale(1,1);opacity:0;animation-timing-function:ease-in}
+  100%{transform:translateY(calc(.35em * var(--amp))) scale(1,1);opacity:0}
+}
+@keyframes s-dp{
+  0%,9%{transform:translateX(-50%) scale(.3);opacity:0}
+  20%{transform:translateX(-50%) scale(calc(1 + .38 * var(--amp)));opacity:.62}
+  28%{transform:translateX(-50%) scale(calc(1 - .4 * var(--amp)));opacity:.16}
+  35%{transform:translateX(-50%) scale(calc(1 + .22 * var(--amp)));opacity:.54}
+  47%,88%{transform:translateX(-50%) scale(1);opacity:.45}
+  96%,100%{transform:translateX(-50%) scale(.3);opacity:0}
+}
+
+/* 暂停 */
+.wm.paused .ch,.wm.paused .ch-sh,.wm.paused .ch-txt{animation-play-state:paused}
+
+/* ---------- 场景模拟 ---------- */
+.scenes{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+.scene{border:1px solid var(--bd);border-radius:14px;overflow:hidden;background:rgba(255,255,255,.03)}
+.scene .cap{padding:9px 13px;font-size:11.5px;color:var(--dim);border-bottom:1px solid var(--bd)}
+.scene .body{padding:20px 16px;display:flex;align-items:center}
+.mock-sidebar{background:#fff;gap:12px}
+.mock-sidebar .meta p:first-child{font-size:14.5px;font-weight:600;color:#1A1A1A;margin:0}
+.mock-sidebar .meta p:last-child{font-size:11px;color:#999;margin:2px 0 0}
+.mock-admin{background:linear-gradient(180deg,#1a1f2e,#252d3d);gap:12px}
+.mock-admin .meta p:first-child{font-size:13.5px;font-weight:600;color:#fff;margin:0}
+.mock-admin .meta p:last-child{font-size:11px;color:rgba(255,255,255,.6);margin:2px 0 0}
+.mock-hero{background:#fff;min-height:200px;flex-direction:column;align-items:flex-start;justify-content:center;gap:4px;padding-top:26px;padding-bottom:26px}
+.mock-hero .lead{font-size:12.5px;color:#6b7280;margin:0}
+.mock-hero .sub{font-size:12px;color:#9ca3af;margin:6px 0 0}
+.mark{width:38px;height:38px;flex:none;border-radius:11px;overflow:hidden;box-shadow:0 6px 18px -6px rgba(79,70,229,.6)}
+.mark svg{display:block;width:100%;height:100%}
+@keyframes radar{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+
+.note{
+  margin-top:32px;padding:15px 18px;border:1px dashed rgba(255,255,255,.16);
+  border-radius:14px;color:var(--dim);font-size:12.5px;line-height:1.95;
+}
+.note b{color:#c4b5fd;font-weight:600}
+code{background:rgba(255,255,255,.08);padding:1px 6px;border-radius:5px;font-size:11.5px}
+.bar{
+  margin:0 0 16px;padding:10px 15px;border-radius:12px;font-size:12.5px;
+  background:linear-gradient(135deg,rgba(124,58,237,.26),rgba(59,130,246,.18));
+  border:1px solid rgba(168,85,247,.35);
+}
+
+@media (prefers-reduced-motion: reduce){
+  .wm .ch,.wm .ch-sh,.wm .ch-txt{animation:none !important}
+}
+</style>
+</head>
+<body data-stage="light">
+<div class="wrap">
+
+  <div class="topbar">
+    <div>
+      <h1 class="title">Sentinel 艺术字 · 弹跳版</h1>
+      <p class="subtitle">这一版换的是<b style="color:#c4b5fd">字形本身</b>（Google Fonts 展示体）+ 带挤压拉伸的物理弹跳。<br/>上方切换组合，下方两个画廊可逐一点选对比。</p>
+    </div>
+    <div class="controls">
+      <label class="ctrl">字体
+        <select id="fontSel"></select>
+      </label>
+      <label class="ctrl">弹跳
+        <select id="bounceSel">
+          <option value="b-squash">Squash 完整弹跳（主推）</option>
+          <option value="b-wave">Wave 连续波浪</option>
+          <option value="b-jelly">Jelly 果冻 Q 弹</option>
+          <option value="b-pop">Pop 轻点克制</option>
+          <option value="b-drop">Drop 掉落入场</option>
+        </select>
+      </label>
+      <label class="ctrl">字号 <input type="range" id="sizeRange" min="28" max="130" value="72"><span id="sizeVal">72px</span></label>
+      <label class="ctrl">幅度 <input type="range" id="ampRange" min="20" max="160" value="100"><span id="ampVal">1.0×</span></label>
+      <label class="ctrl">节奏 <input type="range" id="gapRange" min="0" max="200" value="70"><span id="gapVal">70ms</span></label>
+      <button class="act" id="themeBtn">深底</button>
+      <button class="act" id="pauseBtn">暂停</button>
+    </div>
+  </div>
+
+  <div class="bar" id="bar">当前：<b>Fredoka</b> × <b>Squash 完整弹跳</b></div>
+
+  <div class="hero">
+    <span class="hero-tag">主预览</span>
+    <div class="wm b-squash" data-text="Sentinel">Sentinel</div>
+  </div>
+
+  <h2 class="sec">① 字体画廊 <span style="font-size:12px;color:var(--dim);font-weight:400">— 12 种展示体，同一弹跳，点卡片下方按钮应用</span></h2>
+  <p class="secsub">艺术字的差别在字形：圆润体最配弹跳，粗衬线偏优雅，科技体偏硬朗。</p>
+  <div class="grid g-fonts" id="fontGrid"></div>
+
+  <h2 class="sec">② 弹跳画廊 <span style="font-size:12px;color:var(--dim);font-weight:400">— 5 种节奏，同一字体</span></h2>
+  <p class="secsub">都带 squash &amp; stretch（起跳拉长、落地压扁）与联动的落地阴影，这是"弹"而不是"飘"的关键。</p>
+  <div class="grid g-bounce" id="bounceGrid"></div>
+
+  <h2 class="sec">③ 场景模拟</h2>
+  <p class="secsub">跟随上方选中的字体与弹跳实时变化。</p>
+  <div class="scenes">
+    <div class="scene">
+      <div class="cap">C 端侧边栏（Sidebar.tsx）</div>
+      <div class="body mock-sidebar" data-scene>
+        <span class="mark">
+          <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+            <defs><linearGradient id="sg2" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#7C3AED"/><stop offset="1" stop-color="#3B82F6"/></linearGradient></defs>
+            <path d="M32 4 L55 13 V32 C55 45.5 45 55 32 60 C19 55 9 45.5 9 32 V13 Z" fill="url(#sg2)"/>
+            <path d="M31 22 l2.6 6.4 6.4 2.6 -6.4 2.6 -2.6 6.4 -2.6 -6.4 -6.4 -2.6 6.4 -2.6 Z" fill="#fff"/>
+          </svg>
+        </span>
+        <div class="meta"><p>sentinel AI</p><p>Powered by AI</p></div>
+      </div>
+    </div>
+    <div class="scene">
+      <div class="cap">管理后台侧边栏（深底）</div>
+      <div class="body mock-admin" data-scene>
+        <span class="mark">
+          <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+            <defs><linearGradient id="sg3" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#7C3AED"/><stop offset="1" stop-color="#3B82F6"/></linearGradient></defs>
+            <path d="M32 4 L55 13 V32 C55 45.5 45 55 32 60 C19 55 9 45.5 9 32 V13 Z" fill="url(#sg3)"/>
+            <path d="M31 22 l2.6 6.4 6.4 2.6 -6.4 2.6 -2.6 6.4 -2.6 -6.4 -6.4 -2.6 6.4 -2.6 Z" fill="#fff"/>
+          </svg>
+        </span>
+        <div class="meta"><p>Sentinel AI</p><p>Knowledge Console</p></div>
+      </div>
+    </div>
+    <div class="scene">
+      <div class="cap">首屏 Hero（WelcomeScreen.tsx）</div>
+      <div class="body mock-hero" data-scene>
+        <p class="lead">你好，我是</p>
+        <div class="wm b-squash" style="--wm-size:46px" data-text="Sentinel">Sentinel</div>
+        <p class="sub">把问题变成清晰答案</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="note">
+    <b>关于字体：</b>Google Fonts 已验证可访问，但<b>线上部署建议自托管</b>（下载 woff2 放 <code>public/fonts/</code> + <code>@font-face</code>），避免国内网络抖动导致 fallback 成系统黑体——上一版你看到的"不够艺术"很可能就是字体没生效。<br/>
+    <b>落地方式：</b>抽成 <code>SentinelWordmark.tsx</code>（<code>text</code>/<code>size</code>/<code>bounce</code>/<code>amp</code> props），keyframes 写入 <code>globals.css</code>；逐字拆分为 <code>&lt;span&gt;</code> 并用 <code>aria-label</code> 保证可读性，另加 <code>prefers-reduced-motion</code> 降级为静态渐变。<br/>
+    <b>注意：</b>渐变文字必须逐字独立设 <code>background-clip:text</code>（不能设在父级），否则子元素 transform 会让裁剪失效、文字变透明；落地阴影是独立的椭圆 span，不参与文字裁剪。
+  </div>
+</div>
+
+<script>
+(function(){
+  var FONTS = [
+    {css:'"Fredoka",sans-serif',        name:'Fredoka',        tag:'圆润厚实', desc:'圆头圆脑，最配弹跳，亲和力强'},
+    {css:'"Titan One",sans-serif',      name:'Titan One',      tag:'超粗圆润', desc:'体积感强，像充气糖果'},
+    {css:'"Concert One",sans-serif',    name:'Concert One',    tag:'圆润活泼', desc:'比 Fredoka 更瘦高一点'},
+    {css:'"Rubik Bubbles",sans-serif',  name:'Rubik Bubbles',  tag:'泡泡体',   desc:'空心泡泡轮廓，最童趣'},
+    {css:'"Luckiest Guy",sans-serif',   name:'Luckiest Guy',   tag:'漫画粗黑', desc:'美式漫画招牌，冲击力强'},
+    {css:'"Bungee",sans-serif',         name:'Bungee',         tag:'方块招牌', desc:'方正硬朗，都市霓虹感'},
+    {css:'"Alfa Slab One",serif',       name:'Alfa Slab One',  tag:'超粗衬线', desc:'厚重复古，海报感'},
+    {css:'"Abril Fatface",serif',       name:'Abril Fatface',  tag:'优雅粗衬线',desc:'时尚杂志风，偏优雅'},
+    {css:'"Shrikhand",serif',           name:'Shrikhand',      tag:'复古异域', desc:'个性极强，辨识度高'},
+    {css:'"Audiowide",sans-serif',      name:'Audiowide',      tag:'科技',     desc:'机械几何，最贴"哨兵"调性'},
+    {css:'"Bebas Neue",sans-serif',     name:'Bebas Neue',     tag:'高窄',     desc:'细长紧凑，适合侧边栏'},
+    {css:'"Righteous",sans-serif',      name:'Righteous',      tag:'复古几何', desc:'60 年代太空风'}
+  ];
+  var BOUNCES = [
+    {cls:'b-squash', name:'Squash 完整弹跳', desc:'下蹲→起跳拉长→落地压扁→两次余震，停顿后再来一轮。最像真实皮球。'},
+    {cls:'b-wave',   name:'Wave 连续波浪',   desc:'无停顿的连续起伏，逐字负延迟形成波浪，最活泼也最"闹"。'},
+    {cls:'b-jelly',  name:'Jelly 果冻 Q 弹', desc:'幅度最大、余震最多，软趴趴的果冻感。'},
+    {cls:'b-pop',    name:'Pop 轻点克制',    desc:'大部分时间静止，偶尔轻弹一下。适合侧边栏常驻。'},
+    {cls:'b-drop',   name:'Drop 掉落入场',   desc:'从上方掉下弹两下再淡出，循环。适合首屏/加载态。'}
+  ];
+
+  var root = document.documentElement;
+  var hero = document.querySelector('.hero .wm');
+  var sceneWm = document.querySelectorAll('[data-scene] .wm');
+  var curFont = FONTS[0], curBounce = BOUNCES[0];
+  var paused = false;
+
+  // 拆分字符：.ch(弹跳) > .ch-txt(渐变文字) + .ch-sh(落地阴影)
+  function build(el, text){
+    el.textContent = '';
+    el.setAttribute('aria-label', text);
+    for(var i=0;i<text.length;i++){
+      var ch = document.createElement('span');
+      ch.className = 'ch';
+      ch.style.setProperty('--i', i);
+      var t = document.createElement('span');
+      t.className = 'ch-txt';
+      t.textContent = text[i] === ' ' ? '\u00A0' : text[i];
+      var s = document.createElement('span');
+      s.className = 'ch-sh';
+      ch.appendChild(t); ch.appendChild(s);
+      el.appendChild(ch);
+    }
+  }
+  function rebuildAll(){
+    document.querySelectorAll('.wm').forEach(function(el){
+      var text = el.dataset.text || 'Sentinel';
+      build(el, text);
+    });
+  }
+  function setBounce(cls){
+    document.querySelectorAll('.wm').forEach(function(el){
+      BOUNCES.forEach(function(b){ el.classList.remove(b.cls); });
+      el.classList.add(cls);
+    });
+  }
+  function setFont(css){ root.style.setProperty('--ff', css); }
+
+  // 下拉
+  var fontSel = document.getElementById('fontSel');
+  FONTS.forEach(function(f,i){
+    var o = document.createElement('option');
+    o.value = i; o.textContent = f.name + ' · ' + f.tag;
+    fontSel.appendChild(o);
+  });
+  fontSel.addEventListener('change', function(){
+    curFont = FONTS[this.value];
+    setFont(curFont.css);
+    syncBar();
+    document.querySelectorAll('#fontGrid .card').forEach(function(c,i){ c.classList.toggle('picked', i==fontSel.value); });
+  });
+
+  var bounceSel = document.getElementById('bounceSel');
+  bounceSel.addEventListener('change', function(){
+    var idx = this.value;
+    curBounce = BOUNCES[idx];
+    setBounce(curBounce.cls);
+    syncBar();
+    document.querySelectorAll('#bounceGrid .card').forEach(function(c,i){ c.classList.toggle('picked', i==Number(idx)); });
+  });
+
+  function syncBar(){
+    document.getElementById('bar').innerHTML = '当前：<b>' + curFont.name + '</b> × <b>' + curBounce.name + '</b>';
+  }
+
+  // 字体画廊
+  var fg = document.getElementById('fontGrid');
+  FONTS.forEach(function(f,i){
+    var c = document.createElement('article');
+    c.className = 'card' + (i===0 ? ' picked' : '');
+    c.innerHTML =
+      '<p class="fname">' + f.name + '<em>' + f.tag + '</em></p>' +
+      '<p class="fdesc">' + f.desc + '</p>' +
+      '<div class="mini"><div class="wm" style="--ff:' + f.css + ';--wm-size:34px" data-text="Sentinel"></div></div>' +
+      '<button class="pick">应用此字体</button>';
+    c.querySelector('.pick').addEventListener('click', function(){
+      curFont = f; fontSel.value = i; setFont(f.css); syncBar();
+      fg.querySelectorAll('.card').forEach(function(x){ x.classList.remove('picked'); });
+      c.classList.add('picked');
+    });
+    fg.appendChild(c);
+  });
+
+  // 弹跳画廊
+  var bg = document.getElementById('bounceGrid');
+  BOUNCES.forEach(function(b,i){
+    var c = document.createElement('article');
+    c.className = 'card' + (i===0 ? ' picked' : '');
+    c.innerHTML =
+      '<p class="fname">' + b.name + '</p>' +
+      '<p class="fdesc">' + b.desc + '</p>' +
+      '<div class="mini"><div class="wm ' + b.cls + '" style="--wm-size:34px" data-text="Sentinel"></div></div>' +
+      '<button class="pick">应用此弹跳</button>';
+    c.querySelector('.pick').addEventListener('click', function(){
+      curBounce = b; bounceSel.value = i; setBounce(b.cls); syncBar();
+      bg.querySelectorAll('.card').forEach(function(x){ x.classList.remove('picked'); });
+      c.classList.add('picked');
+    });
+    bg.appendChild(c);
+  });
+
+  // 滑杆
+  var sr=document.getElementById('sizeRange'), sv=document.getElementById('sizeVal');
+  sr.addEventListener('input', function(){ root.style.setProperty('--wm-size', this.value+'px'); sv.textContent=this.value+'px'; });
+  var ar=document.getElementById('ampRange'), av=document.getElementById('ampVal');
+  ar.addEventListener('input', function(){ root.style.setProperty('--amp', this.value/100); av.textContent=(this.value/100).toFixed(1)+'×'; });
+  var gr=document.getElementById('gapRange'), gv=document.getElementById('gapVal');
+  gr.addEventListener('input', function(){ root.style.setProperty('--gap', this.value/1000+'s'); gv.textContent=this.value+'ms'; });
+
+  // 主题 / 暂停
+  document.getElementById('themeBtn').addEventListener('click', function(){
+    var dark = document.body.dataset.stage === 'dark';
+    document.body.dataset.stage = dark ? 'light' : 'dark';
+    this.textContent = dark ? '深底' : '浅底';
+  });
+  document.getElementById('pauseBtn').addEventListener('click', function(){
+    paused = !paused;
+    document.querySelectorAll('.wm').forEach(function(el){ el.classList.toggle('paused', paused); });
+    this.textContent = paused ? '播放' : '暂停';
+  });
+
+  root.style.setProperty('--amp','1');
+  root.style.setProperty('--gap','0.07s');
+  setBounce(curBounce.cls);
+  rebuildAll();
+  syncBar();
+})();
+</script>
+</body>
+</html>

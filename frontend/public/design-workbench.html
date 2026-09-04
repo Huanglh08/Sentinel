@@ -1,0 +1,1745 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sentinel Design Workbench · 设计暂存台</title>
+
+<!--
+================================================================================
+  SENTINEL DESIGN WORKBENCH — 设计暂存台
+================================================================================
+  【文件定位】frontend/public/design-workbench.html
+              纯预览文件，不参与构建，不引用 frontend/src 任何代码。
+
+  【修改规则 —— 只改对应栏，禁止重写整个文件】
+    ① 改配色        → 只改 <style> 中 `/* TOKENS */` 区块的 CSS 变量
+    ② 加/改图标      → 只改 <script> 中 `ICONS` 数组（加一项即可，无需动 HTML）
+    ③ 加/改科技字体  → 只改 `FONTS` 数组
+    ④ 加/改背景      → 只改 `BGS` 数组 + <style> 中 `/* BG:xxx */` 对应样式
+    ⑤ 加/改动效      → 只改 `FX` 数组 + <style> 中 `/* FX:xxx */` 对应 keyframes
+    ⑥ 新增一个部件栏 → 复制任一 <section data-part="..."> 整块，改 data-part
+                      与标题，并在顶部 <nav> 里加一条 <a href="#xxx">
+
+  【栏位索引】
+    PART 00  tokens       配色系统（所有部件的唯一色源）
+    PART 01  icon         图标（sentinel mark）
+    PART 02  brandbar     左上角品牌区 = 图标 + sentinel 艺术字
+    PART 03  hero         首屏 Hero 艺术字（卡通弹跳，已定稿）
+    PART 04  background   页面背景
+    PART 05  composite    合成预览（真实页面模拟）
+
+  约定：每个部件都是独立 <section>，自带渲染函数，互不依赖。
+================================================================================
+-->
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=JetBrains+Mono:wght@400;500;700&family=Fredoka:wght@600;700&family=Chakra+Petch:wght@600;700&family=Rajdhani:wght@600;700&family=Audiowide&family=Michroma&family=Oxanium:wght@700;800&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet" />
+
+<style>
+/* ==========================================================================
+   TOKENS —— 全站唯一色源。改这里，所有部件同步变化。
+   基调：深空底 + 电光青/科技蓝/品牌紫，与左上角 sentinel 图标渐变同源。
+   图标渐变：--sx-cyan → --sx-blue → --sx-violet
+   ========================================================================== */
+:root{
+  /* 底色层级 */
+  --sx-void:   #04070F;
+  --sx-deep:   #070C1A;
+  --sx-panel:  #0A1020;
+  --sx-card:   #0D1426;
+  --sx-line:   #1A2745;
+  --sx-line-2: #243457;
+
+  /* 电光色阶（与图标渐变一致） */
+  --sx-cyan:   #22D3EE;
+  --sx-sky:    #38BDF8;
+  --sx-blue:   #3B82F6;
+  --sx-indigo: #6366F1;
+  --sx-violet: #7C3AED;
+  --sx-purple: #A855F7;
+
+  /* 文字 */
+  --sx-text:   #E6EDF7;
+  --sx-dim:    #7C8AA8;
+  --sx-faint:  #4A5875;
+
+  /* 主渐变（图标/艺术字共用） */
+  --sx-grad:      linear-gradient(135deg,#22D3EE 0%,#3B82F6 48%,#7C3AED 100%);
+  --sx-grad-soft: linear-gradient(135deg,#38BDF8 0%,#6366F1 55%,#A855F7 100%);
+  --sx-grad-dim:  linear-gradient(135deg,#0E7490 0%,#1D4ED8 50%,#5B21B6 100%);
+
+  /* 辉光 */
+  --sx-glow-cyan: 0 0 12px rgba(34,211,238,.55), 0 0 34px rgba(34,211,238,.22);
+  --sx-glow-blue: 0 0 12px rgba(59,130,246,.5), 0 0 34px rgba(59,130,246,.2);
+  --sx-glow-mix:  0 0 10px rgba(34,211,238,.4), 0 0 30px rgba(124,58,237,.3);
+
+  /* 字体 */
+  --ff-display: "Orbitron","Chakra Petch",sans-serif;
+  --ff-mono:    "JetBrains Mono",ui-monospace,Consolas,monospace;
+  --ff-cartoon: "Fredoka","Segoe UI",sans-serif;
+  --ff-cn:      "Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+
+  /* 可调参数 */
+  --amp: 1;          /* 弹跳幅度 */
+  --gap: .07s;       /* 逐字节奏 */
+  --intensity: 1;    /* 背景强度 */
+  --mark-size: 40px; /* 图标尺寸 */
+}
+
+/* ==========================================================================
+   SHELL —— 暂存台外壳（不属于产品，只是容器）
+   ========================================================================== */
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  background:var(--sx-void);
+  color:var(--sx-text);
+  font-family:var(--ff-cn);
+  -webkit-font-smoothing:antialiased;
+  min-height:100vh;
+}
+/* 外壳网格底纹 */
+body::before{
+  content:"";position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.5;
+  background-image:
+    linear-gradient(rgba(34,211,238,.045) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(34,211,238,.045) 1px,transparent 1px);
+  background-size:52px 52px;
+  mask-image:radial-gradient(ellipse 90% 70% at 50% 0%,#000 10%,transparent 72%);
+  -webkit-mask-image:radial-gradient(ellipse 90% 70% at 50% 0%,#000 10%,transparent 72%);
+}
+body::after{
+  content:"";position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.4;
+  background:
+    radial-gradient(900px 480px at 8% -6%,rgba(124,58,237,.22),transparent 60%),
+    radial-gradient(760px 420px at 92% 2%,rgba(34,211,238,.14),transparent 62%);
+}
+
+/* --- 顶部 HUD --- */
+.hud{
+  position:sticky;top:0;z-index:60;
+  display:flex;align-items:center;gap:16px;flex-wrap:wrap;
+  padding:11px 22px;
+  background:rgba(7,12,26,.86);
+  backdrop-filter:blur(14px);
+  border-bottom:1px solid var(--sx-line);
+}
+.hud .logo{display:flex;align-items:center;gap:10px}
+.hud .logo .dot{
+  width:9px;height:9px;border-radius:50%;background:var(--sx-cyan);
+  box-shadow:var(--sx-glow-cyan);animation:livepulse 2.4s ease-in-out infinite;
+}
+@keyframes livepulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.82)}}
+.hud h1{
+  margin:0;font-family:var(--ff-display);font-size:14.5px;font-weight:700;
+  letter-spacing:.16em;text-transform:uppercase;
+}
+.hud .sub{
+  font-family:var(--ff-mono);font-size:10.5px;color:var(--sx-faint);
+  letter-spacing:.1em;border-left:1px solid var(--sx-line);padding-left:14px;
+}
+.hud .spacer{flex:1}
+.hud .ctl{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.btn{
+  font-family:var(--ff-mono);font-size:11px;letter-spacing:.06em;
+  background:var(--sx-card);color:var(--sx-dim);
+  border:1px solid var(--sx-line-2);border-radius:4px;
+  padding:6px 12px;cursor:pointer;transition:.18s;
+  clip-path:polygon(6px 0,100% 0,100% calc(100% - 6px),calc(100% - 6px) 100%,0 100%,0 6px);
+}
+.btn:hover{color:var(--sx-cyan);border-color:rgba(34,211,238,.45);background:#101a33}
+.btn.on{color:#04070F;background:var(--sx-cyan);border-color:var(--sx-cyan);font-weight:700}
+.lbl{
+  display:inline-flex;align-items:center;gap:7px;
+  font-family:var(--ff-mono);font-size:10.5px;color:var(--sx-faint);
+  border:1px solid var(--sx-line);border-radius:4px;padding:5px 10px;background:var(--sx-panel);
+}
+.lbl input[type=range]{accent-color:var(--sx-cyan);width:84px;margin:0}
+.lbl b{color:var(--sx-cyan);font-weight:500;min-width:38px;text-align:right}
+
+/* --- 导航 --- */
+.nav{
+  position:sticky;top:52px;z-index:55;
+  display:flex;gap:2px;flex-wrap:wrap;padding:0 22px;
+  background:rgba(7,12,26,.78);backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--sx-line);
+}
+.nav a{
+  font-family:var(--ff-mono);font-size:11px;letter-spacing:.05em;
+  color:var(--sx-faint);text-decoration:none;padding:9px 13px;
+  border-bottom:2px solid transparent;transition:.18s;
+}
+.nav a:hover{color:var(--sx-text)}
+.nav a.cur{color:var(--sx-cyan);border-bottom-color:var(--sx-cyan)}
+.nav a i{font-style:normal;opacity:.5;margin-right:5px}
+
+/* --- 主体 --- */
+main{position:relative;z-index:1;max-width:1320px;margin:0 auto;padding:30px 22px 100px}
+
+/* --- 部件栏（section）统一外观 --- */
+.part{
+  position:relative;margin:0 0 44px;padding:26px 24px 24px;
+  scroll-margin-top:100px;
+  background:linear-gradient(160deg,rgba(13,20,38,.92),rgba(7,12,26,.92));
+  border:1px solid var(--sx-line);border-radius:6px;
+  clip-path:polygon(16px 0,100% 0,100% calc(100% - 16px),calc(100% - 16px) 100%,0 100%,0 16px);
+}
+/* 四角准星 */
+.part::before,.part::after{
+  content:"";position:absolute;width:14px;height:14px;pointer-events:none;
+}
+.part::before{top:8px;right:8px;border-top:1px solid var(--sx-cyan);border-right:1px solid var(--sx-cyan);opacity:.5}
+.part::after{bottom:8px;left:8px;border-bottom:1px solid var(--sx-cyan);border-left:1px solid var(--sx-cyan);opacity:.5}
+.part > header{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin:0 0 4px}
+.part .pid{
+  font-family:var(--ff-mono);font-size:10.5px;color:var(--sx-cyan);
+  letter-spacing:.12em;border:1px solid rgba(34,211,238,.3);
+  border-radius:3px;padding:2px 7px;background:rgba(34,211,238,.07);
+}
+.part h2{
+  margin:0;font-family:var(--ff-display);font-size:17px;font-weight:700;letter-spacing:.04em;
+}
+.part .note{
+  margin:0 0 16px;font-size:12.3px;color:var(--sx-dim);line-height:1.8;
+  max-width:900px;
+}
+.part .note code{
+  font-family:var(--ff-mono);font-size:11px;color:var(--sx-sky);
+  background:rgba(56,189,248,.1);padding:1px 5px;border-radius:3px;
+}
+.part .note b{color:var(--sx-cyan);font-weight:600}
+
+/* --- 卡片网格 --- */
+.grid{display:grid;gap:12px}
+.g3{grid-template-columns:repeat(auto-fill,minmax(232px,1fr))}
+.g2{grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+.card{
+  background:var(--sx-card);border:1px solid var(--sx-line);border-radius:5px;
+  padding:12px;transition:.18s;position:relative;
+}
+.card:hover{border-color:rgba(34,211,238,.4);background:#101830}
+.card.on{border-color:var(--sx-cyan);box-shadow:0 0 0 1px rgba(34,211,238,.3),0 12px 36px -18px rgba(34,211,238,.5)}
+.card .n{
+  margin:0 0 3px;font-family:var(--ff-display);font-size:12px;font-weight:700;
+  letter-spacing:.03em;display:flex;justify-content:space-between;align-items:center;gap:6px;
+}
+.card .n em{font-style:normal;font-family:var(--ff-mono);font-size:9.5px;color:var(--sx-faint);font-weight:400}
+.card .d{margin:0 0 9px;font-size:11px;color:var(--sx-dim);line-height:1.65;min-height:40px}
+.tagrow{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:9px}
+.tg{
+  font-family:var(--ff-mono);font-size:9.5px;padding:2px 6px;border-radius:3px;
+  border:1px solid var(--sx-line-2);color:var(--sx-faint);letter-spacing:.03em;
+}
+.tg.cy{color:var(--sx-cyan);border-color:rgba(34,211,238,.35);background:rgba(34,211,238,.07)}
+.tg.vi{color:var(--sx-purple);border-color:rgba(168,85,247,.35);background:rgba(168,85,247,.07)}
+.tg.ok{color:#34D399;border-color:rgba(52,211,153,.35);background:rgba(52,211,153,.07)}
+.tg.wn{color:#FBBF24;border-color:rgba(251,191,36,.35);background:rgba(251,191,36,.07)}
+.tg.bd{color:#F87171;border-color:rgba(248,113,113,.35);background:rgba(248,113,113,.07)}
+.card .pick{
+  width:100%;font-family:var(--ff-mono);font-size:10.5px;letter-spacing:.05em;
+  border:1px solid var(--sx-line-2);background:var(--sx-panel);color:var(--sx-dim);
+  padding:6px;border-radius:4px;cursor:pointer;transition:.18s;
+}
+.card .pick:hover{color:var(--sx-cyan);border-color:rgba(34,211,238,.5)}
+.card.on .pick{background:var(--sx-cyan);color:#04070F;border-color:var(--sx-cyan);font-weight:700}
+
+/* --- 展台 --- */
+.stage{
+  position:relative;overflow:hidden;border-radius:5px;
+  border:1px solid var(--sx-line);background:var(--sx-void);
+  display:flex;align-items:center;justify-content:center;
+}
+.stage .stagetag{
+  position:absolute;top:10px;left:12px;z-index:5;
+  font-family:var(--ff-mono);font-size:10px;color:var(--sx-faint);letter-spacing:.1em;
+}
+.stage .stagemeta{
+  position:absolute;top:10px;right:12px;z-index:5;display:flex;gap:6px;
+}
+
+/* --- 通用：切角按钮 --- */
+.clip{clip-path:polygon(7px 0,100% 0,100% calc(100% - 7px),calc(100% - 7px) 100%,0 100%,0 7px)}
+
+/* ==========================================================================
+   PART 01 · ICON
+   ========================================================================== */
+.stage-icon{height:190px}
+.stage-icon svg{width:96px;height:96px;display:block;filter:drop-shadow(0 0 18px rgba(34,211,238,.28))}
+/* 图标内部动画类 */
+.mk-pulse{transform-box:view-box;transform-origin:32px 32px;animation:mkPulse 3s ease-out infinite}
+@keyframes mkPulse{0%{opacity:.7;transform:scale(.55)}70%{opacity:0;transform:scale(1.3)}100%{opacity:0;transform:scale(1.3)}}
+.mk-spin{transform-box:view-box;transform-origin:32px 32px;animation:mkSpin 6s linear infinite}
+@keyframes mkSpin{to{transform:rotate(360deg)}}
+.mk-spin-rev{transform-box:view-box;transform-origin:32px 32px;animation:mkSpinRev 9s linear infinite}
+@keyframes mkSpinRev{to{transform:rotate(-360deg)}}
+.mk-scan{animation:mkScan 3.2s ease-in-out infinite}
+@keyframes mkScan{0%,100%{transform:translateY(0);opacity:0}14%{opacity:.9}50%{transform:translateY(30px);opacity:.9}86%{opacity:0}}
+.mk-trace{stroke-dasharray:80;stroke-dashoffset:80;animation:mkTrace 3.4s ease-in-out infinite}
+@keyframes mkTrace{0%{stroke-dashoffset:80}45%,62%{stroke-dashoffset:0}100%{stroke-dashoffset:-80}}
+.mk-blink{animation:mkBlink 5s infinite}
+@keyframes mkBlink{0%,92%,100%{opacity:1}94%{opacity:.3}96%{opacity:1}}
+.mk-float{transform-box:view-box;transform-origin:50% 60%;animation:mkFloat 4.2s ease-in-out infinite}
+@keyframes mkFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-1.6px)}}
+
+/* ==========================================================================
+   PART 02 · BRANDBAR（图标 + sentinel 艺术字）
+   ========================================================================== */
+.stage-bar{height:170px;padding:26px}
+.simbar{
+  /* 与 PART 05 合成预览保持一致：图标 + 字标间距 8px */
+  display:flex;align-items:center;gap:var(--bar-gap,8px);
+  padding:10px 14px;border-radius:6px;
+  background:linear-gradient(180deg,rgba(20,30,54,.9),rgba(10,16,32,.9));
+  border:1px solid var(--sx-line-2);
+  box-shadow:0 14px 40px -20px rgba(0,0,0,.8);
+}
+.simbar .mk{width:var(--mark-size);height:var(--mark-size);flex:none}
+.simbar .mk svg{width:100%;height:100%;display:block}
+.simbar .txt{overflow:hidden}
+.wm{display:inline-block;font-family:var(--ff-display);font-size:var(--wm-size,24px);
+  font-weight:700;line-height:1.15;letter-spacing:.02em;white-space:nowrap}
+.wm .tx{
+  background-image:var(--sx-grad-soft);background-size:220% 100%;
+  -webkit-background-clip:text;background-clip:text;
+  -webkit-text-fill-color:transparent;color:transparent;
+  animation:wmFlow 7s linear infinite;
+}
+@keyframes wmFlow{from{background-position:0 50%}to{background-position:220% 50%}}
+
+/* FX: holo 全息扫描 */
+.fx-holo{position:relative}
+.fx-holo::after{
+  content:attr(data-text);position:absolute;left:0;top:0;white-space:nowrap;pointer-events:none;
+  background-image:linear-gradient(180deg,transparent 38%,rgba(255,255,255,.95) 50%,transparent 62%);
+  background-size:100% 240%;
+  -webkit-background-clip:text;background-clip:text;
+  -webkit-text-fill-color:transparent;color:transparent;
+  animation:wmHolo 3.4s cubic-bezier(.5,0,.5,1) infinite;
+}
+@keyframes wmHolo{0%{background-position:0 -120%}55%,100%{background-position:0 220%}}
+/* FX: glitch 故障 */
+.fx-glitch{position:relative}
+.fx-glitch::before,.fx-glitch::after{
+  content:attr(data-text);position:absolute;left:0;top:0;white-space:nowrap;
+  pointer-events:none;opacity:0;
+}
+.fx-glitch::before{color:var(--sx-cyan);animation:wmGlA 5.6s steps(1,end) infinite}
+.fx-glitch::after{color:var(--sx-purple);animation:wmGlB 5.6s steps(1,end) infinite}
+@keyframes wmGlA{0%,86%{opacity:0;transform:none}87%{opacity:.85;transform:translate(-1.5px,0)}
+  88%{opacity:.85;transform:translate(1.5px,-1px)}89%{opacity:.85;transform:translate(-1px,1px)}90%,100%{opacity:0;transform:none}}
+@keyframes wmGlB{0%,86%{opacity:0;transform:none}87%{opacity:.85;transform:translate(1.5px,0)}
+  88%{opacity:.85;transform:translate(-1.5px,1px)}89%{opacity:.85;transform:translate(1px,-1px)}90%,100%{opacity:0;transform:none}}
+/* FX: flicker 启辉 */
+.fx-flick .tx{animation:wmFlow 7s linear infinite,wmFlick 7s steps(1,end) infinite}
+@keyframes wmFlick{0%,42%{opacity:1}43%{opacity:.3}44%{opacity:1}45%{opacity:.5}46%{opacity:1}
+  58%{opacity:1}59%{opacity:.35}60%{opacity:1}100%{opacity:1}}
+/* FX: circuit 逐段点亮 */
+.fx-circ .ch{display:inline-block;clip-path:inset(0 100% 0 0);animation:wmCirc .5s cubic-bezier(.3,.8,.3,1) forwards;animation-delay:calc(var(--i) * .05s)}
+@keyframes wmCirc{to{clip-path:inset(0 0 0 0)}}
+.fx-circ .tx{animation:wmFlow 7s linear infinite}
+/* FX: pulse 脉冲 */
+.fx-pulse{animation:wmPulse 3.2s ease-in-out infinite}
+@keyframes wmPulse{0%,100%{filter:none}50%{filter:drop-shadow(0 0 7px rgba(34,211,238,.6)) drop-shadow(0 0 18px rgba(124,58,237,.32))}}
+.fx-pulse .tx{animation:wmFlow 7s linear infinite}
+/* FX: neon 霓虹描边 */
+.fx-neon .tx{
+  background-image:var(--sx-grad-soft);
+  animation:wmFlow 7s linear infinite;
+}
+.fx-neon{filter:drop-shadow(0 0 5px rgba(34,211,238,.5)) drop-shadow(0 0 16px rgba(124,58,237,.35))}
+
+/* 溢出测量 */
+.ovf{outline:1px dashed #F87171;outline-offset:2px}
+
+/* ==========================================================================
+   PART 03 · HERO（卡通弹跳，已定稿）
+   ========================================================================== */
+.stage-hero{height:220px;padding:30px}
+.wmc{
+  display:inline-block;font-family:var(--ff-cartoon);
+  font-size:var(--hero-size,52px);font-weight:700;line-height:1.2;
+  letter-spacing:.01em;white-space:nowrap;padding-bottom:.14em;
+}
+.wmc .ch{position:relative;display:inline-block;transform-origin:50% 88%;will-change:transform}
+.wmc .ch-txt{
+  display:inline-block;
+  background-image:var(--sx-grad-soft);background-size:210% 100%;
+  -webkit-background-clip:text;background-clip:text;
+  -webkit-text-fill-color:transparent;color:transparent;
+  animation:wmFlow 7s linear infinite;
+}
+.wmc .ch-sh{
+  position:absolute;left:50%;bottom:-.06em;width:.78em;height:.13em;border-radius:50%;
+  background:radial-gradient(ellipse at center,rgba(34,211,238,.5),rgba(34,211,238,0) 72%);
+  transform:translateX(-50%);pointer-events:none;
+}
+.b-squash .ch{animation:bSq 2.4s infinite;animation-delay:calc(var(--i) * var(--gap))}
+.b-squash .ch-sh{animation:sSq 2.4s infinite;animation-delay:calc(var(--i) * var(--gap))}
+@keyframes bSq{
+  0%,52%,100%{transform:translateY(0) scale(1,1);animation-timing-function:ease-in-out}
+  56%{transform:translateY(calc(.05em * var(--amp))) scale(calc(1 + .14 * var(--amp)),calc(1 - .14 * var(--amp)));animation-timing-function:cubic-bezier(.2,.7,.4,1)}
+  63%{transform:translateY(calc(-.44em * var(--amp))) scale(calc(1 - .08 * var(--amp)),calc(1 + .12 * var(--amp)));animation-timing-function:cubic-bezier(.4,0,.6,1)}
+  71%{transform:translateY(calc(-.54em * var(--amp))) scale(1,1);animation-timing-function:cubic-bezier(.5,0,.7,.6)}
+  79%{transform:translateY(calc(-.07em * var(--amp))) scale(calc(1 - .05 * var(--amp)),calc(1 + .08 * var(--amp)));animation-timing-function:cubic-bezier(.3,0,.7,1)}
+  85%{transform:translateY(0) scale(calc(1 + .28 * var(--amp)),calc(1 - .26 * var(--amp)));animation-timing-function:cubic-bezier(.2,.9,.4,1)}
+  90%{transform:translateY(calc(-.12em * var(--amp))) scale(calc(1 - .03 * var(--amp)),calc(1 + .05 * var(--amp)));animation-timing-function:cubic-bezier(.4,0,.6,1)}
+  94%{transform:translateY(0) scale(calc(1 + .11 * var(--amp)),calc(1 - .09 * var(--amp)));animation-timing-function:ease-out}
+  97%{transform:translateY(0) scale(calc(1 + .03 * var(--amp)),calc(1 - .03 * var(--amp)))}
+}
+@keyframes sSq{
+  0%,52%,100%{transform:translateX(-50%) scale(1);opacity:.45}
+  71%{transform:translateX(-50%) scale(calc(1 - .42 * var(--amp)));opacity:.14}
+  85%{transform:translateX(-50%) scale(calc(1 + .30 * var(--amp)));opacity:.55}
+  94%{transform:translateX(-50%) scale(calc(1 + .06 * var(--amp)));opacity:.48}
+}
+.b-wave .ch{animation:bWv 1.5s ease-in-out infinite;animation-delay:calc(var(--i) * var(--gap) * -1)}
+.b-wave .ch-sh{animation:sWv 1.5s ease-in-out infinite;animation-delay:calc(var(--i) * var(--gap) * -1)}
+@keyframes bWv{
+  0%,100%{transform:translateY(0) scale(1,1)}
+  22%{transform:translateY(calc(-.30em * var(--amp))) scale(calc(1 - .06 * var(--amp)),calc(1 + .09 * var(--amp)))}
+  45%{transform:translateY(0) scale(calc(1 + .09 * var(--amp)),calc(1 - .08 * var(--amp)))}
+  62%{transform:translateY(calc(-.09em * var(--amp))) scale(1,1)}
+  80%{transform:translateY(0) scale(calc(1 + .03 * var(--amp)),calc(1 - .03 * var(--amp)))}
+}
+@keyframes sWv{
+  0%,100%{transform:translateX(-50%) scale(1);opacity:.45}
+  22%{transform:translateX(-50%) scale(calc(1 - .34 * var(--amp)));opacity:.16}
+  45%{transform:translateX(-50%) scale(calc(1 + .12 * var(--amp)));opacity:.5}
+}
+.b-jelly .ch{animation:bJl 2.8s infinite;animation-delay:calc(var(--i) * var(--gap))}
+.b-jelly .ch-sh{animation:sJl 2.8s infinite;animation-delay:calc(var(--i) * var(--gap))}
+@keyframes bJl{
+  0%,48%,100%{transform:translateY(0) scale(1,1)}
+  53%{transform:translateY(calc(.07em * var(--amp))) scale(calc(1 + .20 * var(--amp)),calc(1 - .18 * var(--amp)))}
+  61%{transform:translateY(calc(-.58em * var(--amp))) scale(calc(1 - .11 * var(--amp)),calc(1 + .16 * var(--amp)))}
+  70%{transform:translateY(calc(-.10em * var(--amp))) scale(calc(1 - .02 * var(--amp)),calc(1 + .06 * var(--amp)))}
+  76%{transform:translateY(0) scale(calc(1 + .36 * var(--amp)),calc(1 - .30 * var(--amp)))}
+  81%{transform:translateY(calc(-.20em * var(--amp))) scale(calc(1 - .05 * var(--amp)),calc(1 + .09 * var(--amp)))}
+  86%{transform:translateY(0) scale(calc(1 + .22 * var(--amp)),calc(1 - .18 * var(--amp)))}
+  90%{transform:translateY(calc(-.08em * var(--amp))) scale(calc(1 - .02 * var(--amp)),calc(1 + .04 * var(--amp)))}
+  94%{transform:translateY(0) scale(calc(1 + .09 * var(--amp)),calc(1 - .07 * var(--amp)))}
+  97%{transform:translateY(0) scale(calc(1 - .03 * var(--amp)),calc(1 + .03 * var(--amp)))}
+}
+@keyframes sJl{
+  0%,48%,100%{transform:translateX(-50%) scale(1);opacity:.45}
+  61%{transform:translateX(-50%) scale(calc(1 - .5 * var(--amp)));opacity:.12}
+  76%{transform:translateX(-50%) scale(calc(1 + .38 * var(--amp)));opacity:.6}
+  86%{transform:translateX(-50%) scale(calc(1 + .2 * var(--amp)));opacity:.52}
+  97%{transform:translateX(-50%) scale(calc(1 - .04 * var(--amp)));opacity:.4}
+}
+.b-pop .ch{animation:bPp 3.2s infinite;animation-delay:calc(var(--i) * var(--gap))}
+.b-pop .ch-sh{animation:sPp 3.2s infinite;animation-delay:calc(var(--i) * var(--gap))}
+@keyframes bPp{
+  0%,26%,100%{transform:translateY(0) scale(1,1)}
+  30%{transform:translateY(calc(.06em * var(--amp))) scale(calc(1 + .18 * var(--amp)),calc(1 - .16 * var(--amp)))}
+  38%{transform:translateY(calc(-.46em * var(--amp))) scale(calc(1 - .09 * var(--amp)),calc(1 + .13 * var(--amp)))}
+  45%{transform:translateY(0) scale(calc(1 + .30 * var(--amp)),calc(1 - .26 * var(--amp)))}
+  51%{transform:translateY(calc(-.15em * var(--amp))) scale(calc(1 - .04 * var(--amp)),calc(1 + .06 * var(--amp)))}
+  57%{transform:translateY(0) scale(calc(1 + .13 * var(--amp)),calc(1 - .11 * var(--amp)))}
+  63%{transform:translateY(calc(-.04em * var(--amp))) scale(1,1)}
+  68%{transform:translateY(0) scale(1,1)}
+}
+@keyframes sPp{
+  0%,26%,100%{transform:translateX(-50%) scale(1);opacity:.45}
+  38%{transform:translateX(-50%) scale(calc(1 - .44 * var(--amp)));opacity:.13}
+  45%{transform:translateX(-50%) scale(calc(1 + .32 * var(--amp)));opacity:.56}
+  57%{transform:translateX(-50%) scale(calc(1 + .08 * var(--amp)));opacity:.48}
+}
+
+/* ==========================================================================
+   PART 04 · BACKGROUND
+   ========================================================================== */
+.stage-bg{height:340px}
+.fx{position:absolute;inset:0;pointer-events:none;opacity:var(--intensity)}
+.card .fx{opacity:1}
+
+/* 所有背景层统一绝对定位铺满容器（放在 .fx 或 .comp .bg 内都成立） */
+.bg-aurora,.bg-pgrid,.bg-hex,.bg-circ,.bg-scan,.bg-cv{
+  position:absolute;inset:0;overflow:hidden;
+}
+
+/* BG: aurora 深空极光 */
+.bg-aurora{background:var(--sx-void)}
+.bg-aurora i{position:absolute;display:block;border-radius:50%;filter:blur(60px)}
+.bg-aurora i:nth-child(1){width:46%;padding-bottom:46%;left:-6%;top:-10%;background:rgba(124,58,237,.42);animation:bgDr1 26s ease-in-out infinite}
+.bg-aurora i:nth-child(2){width:42%;padding-bottom:42%;right:-8%;top:2%;background:rgba(34,211,238,.26);animation:bgDr2 32s ease-in-out infinite}
+.bg-aurora i:nth-child(3){width:54%;padding-bottom:54%;left:22%;bottom:-24%;background:rgba(59,130,246,.32);animation:bgDr3 38s ease-in-out infinite}
+@keyframes bgDr1{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(9%,7%) scale(1.12)}}
+@keyframes bgDr2{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(-8%,11%) scale(1.08)}}
+@keyframes bgDr3{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(-6%,-9%) scale(1.15)}}
+.bg-aurora .mesh{
+  position:absolute;inset:0;opacity:.9;
+  background-image:linear-gradient(rgba(34,211,238,.11) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(34,211,238,.11) 1px,transparent 1px);
+  background-size:46px 46px;
+  mask-image:radial-gradient(ellipse 80% 70% at 50% 45%,#000 18%,transparent 78%);
+  -webkit-mask-image:radial-gradient(ellipse 80% 70% at 50% 45%,#000 18%,transparent 78%);
+}
+
+/* BG: pgrid 透视网格 */
+.bg-pgrid{overflow:hidden;background:linear-gradient(180deg,#04070F 0%,#070C1A 46%,#12203F 100%)}
+.bg-pgrid .hz{
+  position:absolute;left:0;right:0;top:50%;height:2px;
+  background:linear-gradient(90deg,transparent,var(--sx-cyan),var(--sx-violet),transparent);
+  box-shadow:0 0 26px 6px rgba(34,211,238,.32);
+}
+.bg-pgrid .fl{
+  position:absolute;left:-60%;width:220%;top:50%;bottom:-14%;
+  transform:perspective(320px) rotateX(66deg);transform-origin:50% 0;
+  background-image:linear-gradient(rgba(34,211,238,.4) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(34,211,238,.4) 1px,transparent 1px);
+  background-size:64px 64px;
+  animation:bgPgr 5.2s linear infinite;
+  mask-image:linear-gradient(180deg,#000 0%,rgba(0,0,0,.5) 42%,transparent 88%);
+  -webkit-mask-image:linear-gradient(180deg,#000 0%,rgba(0,0,0,.5) 42%,transparent 88%);
+}
+@keyframes bgPgr{to{background-position:0 64px,0 0}}
+.bg-pgrid .gl{
+  position:absolute;left:0;right:0;top:50%;height:46%;
+  background:radial-gradient(ellipse 70% 100% at 50% 0%,rgba(59,130,246,.34),transparent 72%);
+}
+.bg-pgrid .st{
+  position:absolute;inset:0;
+  background-image:radial-gradient(1px 1px at 20% 24%,rgba(255,255,255,.55),transparent),
+                   radial-gradient(1px 1px at 68% 16%,rgba(255,255,255,.4),transparent),
+                   radial-gradient(1px 1px at 84% 38%,rgba(255,255,255,.5),transparent),
+                   radial-gradient(1px 1px at 38% 10%,rgba(255,255,255,.35),transparent),
+                   radial-gradient(1px 1px at 10% 42%,rgba(255,255,255,.4),transparent);
+  opacity:.7;animation:bgTwi 5s ease-in-out infinite;
+}
+@keyframes bgTwi{0%,100%{opacity:.45}50%{opacity:.9}}
+
+/* BG: hex 六边蜂窝 */
+.bg-hex{overflow:hidden;background:var(--sx-void)}
+.bg-hex svg{position:absolute;inset:0;width:100%;height:100%;animation:bgHexd 34s linear infinite}
+@keyframes bgHexd{to{transform:translate(-30px,-52px)}}
+.bg-hex .hg{
+  position:absolute;inset:0;
+  background:radial-gradient(ellipse 70% 60% at 20% 16%,rgba(124,58,237,.4),transparent 62%),
+             radial-gradient(ellipse 60% 60% at 84% 80%,rgba(34,211,238,.24),transparent 62%);
+  animation:bgHb 9s ease-in-out infinite;
+}
+@keyframes bgHb{0%,100%{opacity:.5}50%{opacity:.95}}
+
+/* BG: circ 电路走线 */
+.bg-circ{overflow:hidden;background:var(--sx-void)}
+.bg-circ svg{position:absolute;inset:0;width:100%;height:100%}
+.bg-circ .base{fill:none;stroke:rgba(34,211,238,.13);stroke-width:1}
+.bg-circ .flow{fill:none;stroke:var(--sx-cyan);stroke-width:1.6;stroke-linecap:round;
+  stroke-dasharray:26 210;filter:drop-shadow(0 0 4px rgba(34,211,238,.7));
+  animation:bgCf 5.5s linear infinite}
+@keyframes bgCf{to{stroke-dashoffset:-472}}
+.bg-circ .node{fill:var(--sx-cyan);animation:bgNp 3.6s ease-in-out infinite}
+@keyframes bgNp{0%,100%{opacity:.3;r:2}50%{opacity:1;r:2.8}}
+
+/* BG: scan 扫描网格 */
+.bg-scan{overflow:hidden;background:var(--sx-void)}
+.bg-scan .g{
+  position:absolute;inset:0;opacity:.8;
+  background-image:linear-gradient(rgba(34,211,238,.09) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(34,211,238,.09) 1px,transparent 1px);
+  background-size:40px 40px;
+}
+.bg-scan .bm{
+  position:absolute;left:0;right:0;height:170px;top:-170px;
+  background:linear-gradient(180deg,transparent,rgba(59,130,246,.24),transparent);
+  animation:bgSc 8s cubic-bezier(.5,0,.5,1) infinite;
+}
+@keyframes bgSc{0%{top:-170px}55%,100%{top:100%}}
+.bg-scan .ln{
+  position:absolute;left:0;right:0;height:1px;top:-2px;
+  background:linear-gradient(90deg,transparent,var(--sx-cyan),transparent);
+  box-shadow:0 0 12px rgba(34,211,238,.8);
+  animation:bgSl 8s cubic-bezier(.5,0,.5,1) infinite;
+}
+@keyframes bgSl{0%{top:-2px}55%,100%{top:100%}}
+.bg-scan .vg{
+  position:absolute;inset:0;
+  background:radial-gradient(ellipse 90% 80% at 50% 50%,transparent 40%,rgba(4,7,15,.82) 100%);
+}
+.bg-scan .bl{
+  position:absolute;inset:0;
+  background:radial-gradient(ellipse 56% 48% at 16% 10%,rgba(124,58,237,.34),transparent 60%),
+             radial-gradient(ellipse 52% 48% at 86% 90%,rgba(34,211,238,.2),transparent 60%);
+}
+
+/* BG: canvas 类 */
+.bg-cv{overflow:hidden;background:var(--sx-void)}
+.bg-cv canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+
+/* ==========================================================================
+   PART 05 · COMPOSITE
+   ========================================================================== */
+.comp{
+  position:relative;height:420px;border-radius:6px;overflow:hidden;
+  border:1px solid var(--sx-line-2);background:var(--sx-void);
+}
+.comp .bg{position:absolute;inset:0;z-index:0}
+.comp .ui{position:absolute;inset:0;z-index:2;display:flex}
+.comp .side{
+  position:relative;
+  width:280px;flex:none;padding:12px;
+  background:rgba(8,13,26,.72);backdrop-filter:blur(14px);
+  border-right:1px solid var(--sx-line);
+}
+/* 对齐辅助线（双线，重合即对齐）
+   红线 = 高亮框左缘（12px，固定基准）
+   青线 = 图标「可见图形」左缘（随 pad 补偿移动）
+   两线重合 → 图形与高亮框对齐 */
+.comp.guides .side::before{
+  content:"";position:absolute;top:0;bottom:0;width:1px;z-index:9;
+  /* 随「高亮框偏移」滑块移动 */
+  left:calc(12px + var(--nav-nudge,0px));
+  pointer-events:none;background:rgba(248,113,113,.75);
+  box-shadow:0 0 6px rgba(248,113,113,.5);
+}
+.comp.guides .side::after{
+  content:"";position:absolute;top:0;bottom:0;width:1px;z-index:10;
+  left:var(--guide-icon,12px);
+  pointer-events:none;background:rgba(34,211,238,.95);
+  box-shadow:0 0 6px rgba(34,211,238,.7);
+}
+/* 图例 */
+.comp.guides .legend{
+  position:absolute;left:14px;bottom:8px;z-index:11;
+  font-family:var(--ff-mono);font-size:9px;line-height:1.7;
+  pointer-events:none;
+}
+.comp.guides .legend i{display:block;font-style:normal}
+.comp.guides .legend{display:block !important}
+.comp.guides .legend i.r{color:rgba(248,113,113,.95)}
+.comp.guides .legend i.c{color:rgba(34,211,238,.95)}
+.comp .side .bar{
+  /* 图标与字标间距：默认 8px（比常规 12px 更紧凑，二者成一个视觉组） */
+  display:flex;align-items:center;gap:var(--bar-gap,8px);
+  padding-bottom:12px;border-bottom:1px solid var(--sx-line);
+}
+.comp .side .mk{
+  width:40px;height:40px;flex:none;
+  /* margin-left 由 JS 的 applyMarkOffset() 按图标 pad 自动设置，
+     用于抵消 SVG 内部留白，使「可见图形左缘」落在 12px（与高亮框齐平）。
+     不要用 CSS 覆盖此项，否则光学补偿失效。 */
+}
+.comp .side .mk svg{width:100%;height:100%;display:block}
+/* 280 - 24(padding) - 40(icon) - 8(gap) = 208px */
+.comp .side .txtbox{width:208px;overflow:hidden}
+/* ==========================================================================
+   侧边栏功能区（导航）
+   高亮框左缘 = 12px + var(--nav-nudge)，由「高亮框偏移」滑块控制。
+   对齐目标：高亮框左缘（红线） 与 图标可见图形左缘（青线）重合。
+   ========================================================================== */
+.comp .side .nav{
+  padding-top:12px;display:flex;flex-direction:column;
+  /* margin-left 由 JS 按 navNudge 设置 */
+}
+/* 分组标题 */
+/* 侧边栏文字可读性优化（与 pages-overview.html 同步）
+   中文低于 12px 几乎不可读；uppercase 对中文无效；
+   .15em 字距是西文小标题做法，套中文会让字距过散更糊。 */
+.comp .side .navgroup{
+  font-family:var(--ff-cn);font-size:11px;font-weight:700;
+  letter-spacing:.035em;color:#A8B7D4;
+  padding:14px 10px 6px;text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased;
+}
+.comp .side .navgroup:first-child{padding-top:0}
+/* 导航项基础 */
+.navitem{
+  display:flex;align-items:center;gap:9px;position:relative;
+  font-size:13.5px;font-weight:600;color:#D2DCF0;letter-spacing:0;line-height:1.35;
+  padding:8px 10px;margin-bottom:2px;
+  border:1px solid transparent;border-radius:4px;
+  cursor:default;text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased;
+  transition:background .16s,color .16s,border-color .16s,box-shadow .16s;
+}
+.navitem > svg{width:16px;height:16px;flex:none;opacity:.86;transition:.16s}
+.navitem:hover{color:#F4F8FF;background:rgba(255,255,255,.045)}
+.navitem.act{color:#67E8F9;font-weight:700}
+.navitem.act > svg{opacity:1}
+
+/* --- 风格 1：Accent Bar 左侧竖条（默认 / 推荐） --- */
+.ns-bar .navitem.act{
+  background:linear-gradient(90deg,rgba(34,211,238,.16),rgba(34,211,238,.02) 70%);
+  box-shadow:inset 2px 0 0 var(--sx-cyan);
+  border-color:rgba(34,211,238,.2);
+}
+/* --- 风格 2：Glow Slab 辉光块 --- */
+.ns-glow .navitem.act{
+  background:rgba(34,211,238,.1);
+  border-color:rgba(34,211,238,.45);
+  box-shadow:0 0 16px -3px rgba(34,211,238,.55),inset 0 0 14px -7px rgba(34,211,238,.85);
+}
+/* --- 风格 3：Notch 切角（HUD 风） --- */
+.ns-notch .navitem{border-radius:0}
+.ns-notch .navitem.act{
+  background:linear-gradient(90deg,rgba(34,211,238,.17),rgba(34,211,238,.015) 72%);
+  border-color:transparent;border-left:2px solid var(--sx-cyan);
+  padding-left:9px;
+  clip-path:polygon(0 0,100% 0,100% calc(100% - 7px),calc(100% - 7px) 100%,0 100%);
+}
+/* --- 风格 4：Pill 胶囊 --- */
+.ns-pill .navitem{border-radius:999px;padding-left:12px}
+.ns-pill .navitem.act{
+  background:rgba(34,211,238,.13);
+  border-color:rgba(34,211,238,.35);
+}
+/* --- 风格 5：Ghost 幽灵（极简） --- */
+.ns-ghost .navitem.act{background:transparent;border-color:transparent}
+.ns-ghost .navitem.act::before{
+  content:"";position:absolute;left:1px;top:50%;transform:translateY(-50%);
+  width:3px;height:3px;background:var(--sx-cyan);box-shadow:0 0 6px var(--sx-cyan);
+}
+.comp .body{flex:1;display:flex;flex-direction:column;min-width:0}
+.comp .body .top{
+  height:46px;flex:none;display:flex;align-items:center;padding:0 16px;
+  border-bottom:1px solid var(--sx-line);color:var(--sx-dim);font-size:12px;
+  background:rgba(8,13,26,.5);backdrop-filter:blur(10px);
+}
+.comp .body .mid{flex:1;display:flex;align-items:center;justify-content:center;padding:20px}
+.comp .body .btm{flex:none;padding:14px 20px}
+.comp .input{
+  max-width:620px;margin:0 auto;padding:11px 15px;border-radius:8px;
+  background:rgba(13,20,38,.8);backdrop-filter:blur(12px);
+  border:1px solid var(--sx-line-2);
+  display:flex;align-items:center;justify-content:space-between;
+  font-size:12.5px;color:var(--sx-faint);
+}
+.comp .input b{color:var(--sx-cyan);font-weight:500;font-family:var(--ff-mono);font-size:11px}
+.compbub{
+  max-width:460px;padding:11px 15px;border-radius:12px;font-size:13px;line-height:1.75;
+  margin-bottom:10px;
+}
+.compbub.ai{background:rgba(13,20,38,.86);color:var(--sx-text);border:1px solid var(--sx-line-2);backdrop-filter:blur(10px)}
+.compbub.me{margin-left:auto;background:linear-gradient(135deg,rgba(59,130,246,.9),rgba(124,58,237,.9));color:#fff}
+.compbub.hint{background:transparent;color:var(--sx-faint);font-size:11.5px;text-align:center;border:0}
+
+/* 提示条 */
+.tip{
+  margin-top:16px;padding:12px 15px;border-radius:5px;font-size:12px;line-height:1.85;
+  background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.3);color:#FCD34D;
+}
+.tip b{color:#FDE68A}
+.tip.ok{background:rgba(52,211,153,.08);border-color:rgba(52,211,153,.3);color:#A7F3D0}
+.tip.ok b{color:#6EE7B7}
+
+/* 色板 */
+.swatches{display:flex;flex-wrap:wrap;gap:8px}
+.sw{
+  flex:1;min-width:104px;border-radius:5px;overflow:hidden;
+  border:1px solid var(--sx-line);background:var(--sx-card);
+}
+.sw .chip{height:44px}
+.sw .meta{padding:7px 9px}
+.sw .meta p{margin:0;font-family:var(--ff-mono);font-size:9.5px;color:var(--sx-faint);letter-spacing:.05em}
+.sw .meta p:first-child{color:var(--sx-text);font-size:10.5px;margin-bottom:2px}
+
+/* 暂停 */
+body.paused .mk-pulse,body.paused .mk-spin,body.paused .mk-spin-rev,body.paused .mk-scan,
+body.paused .mk-trace,body.paused .mk-blink,body.paused .mk-float,
+body.paused .wm .tx,body.paused .fx-holo::after,body.paused .fx-glitch::before,
+body.paused .fx-glitch::after,body.paused .fx-flick .tx,body.paused .fx-pulse,
+body.paused .wmc .ch,body.paused .wmc .ch-sh,body.paused .wmc .ch-txt,
+body.paused .bg-aurora i,body.paused .bg-pgrid .fl,body.paused .bg-pgrid .st,
+body.paused .bg-hex svg,body.paused .bg-hex .hg,body.paused .bg-circ .flow,
+body.paused .bg-circ .node,body.paused .bg-scan .bm,body.paused .bg-scan .ln,
+body.paused .hud .logo .dot{animation:none !important}
+
+@media (prefers-reduced-motion: reduce){
+  *{animation-duration:.01ms !important;animation-iteration-count:1 !important}
+}
+</style>
+</head>
+<body>
+
+<!-- ======================= HUD ======================= -->
+<div class="hud">
+  <div class="logo">
+    <span class="dot"></span>
+    <h1>Sentinel Design Workbench</h1>
+  </div>
+  <span class="sub">设计暂存台 · 分栏维护 · 改栏不重写</span>
+  <span class="spacer"></span>
+  <div class="ctl">
+  <button class="btn" id="btnGuide">对齐辅助线</button>
+  <button class="btn" id="btnPause">暂停动效</button>
+  <button class="btn" id="btnTop">回到顶部</button>
+  </div>
+</div>
+
+<!-- ======================= NAV ======================= -->
+<nav class="nav" id="nav">
+  <a href="#tokens"><i>00</i>配色</a>
+  <a href="#icon"><i>01</i>图标</a>
+  <a href="#brandbar"><i>02</i>左上角品牌区</a>
+  <a href="#hero"><i>03</i>首屏艺术字</a>
+  <a href="#background"><i>04</i>页面背景</a>
+  <a href="#composite"><i>05</i>合成预览</a>
+</nav>
+
+<main>
+
+  <!-- ==========================================================
+       PART 00 · TOKENS
+       ========================================================== -->
+  <section class="part" data-part="tokens" id="tokens">
+    <header><span class="pid">PART 00</span><h2>配色系统 · Design Tokens</h2></header>
+    <p class="note">
+      所有部件的唯一色源。基调为<b>深空底 + 电光青 → 科技蓝 → 品牌紫</b>，
+      与左上角 sentinel 图标的渐变同源（<code>--sx-grad</code>）。
+      改这里的值，图标、艺术字、背景会同步变化 —— 这是「适配图标配色」的实现方式。
+    </p>
+    <div class="swatches" id="swatches"></div>
+    <div class="tip ok">
+      <b>科技感是怎么提上来的：</b>底色从原来的浅灰 <code>#FAFAFA</code> 换成深空 <code>#04070F</code>，
+      强调色引入电光青 <code>#22D3EE</code> 与品牌紫形成冷暖对冲，并全线加入霓虹辉光
+      （<code>--sx-glow-*</code>）。深色底是高饱和电光色产生「发光感」的前提 —— 浅底做不出真正的科技感。
+    </div>
+  </section>
+
+  <!-- ==========================================================
+       PART 01 · ICON
+       ========================================================== -->
+  <section class="part" data-part="icon" id="icon">
+    <header><span class="pid">PART 01</span><h2>图标 · Sentinel Mark</h2></header>
+    <p class="note">
+      用于左上角品牌区、favicon、登录页。全部为 64×64 内联 SVG，无位图，可无损缩放到 16px。
+      配色统一取 <code>--sx-grad</code>（青 → 蓝 → 紫）。
+      <b>新增图标：在 JS 的 ICONS 数组里加一项即可，无需改动 HTML。</b>
+    </p>
+    <div class="stage stage-icon" style="margin-bottom:14px">
+      <span class="stagetag">// MAIN PREVIEW</span>
+      <div class="stagemeta"><span class="tg cy" id="iconTag">—</span></div>
+      <div id="iconMain"></div>
+    </div>
+    <div class="grid g3" id="iconGrid"></div>
+    <div class="tip">
+      <b>选型标准：</b>折叠态只留图标，因此「能否独立表意」是第一标准。
+      16px 下建议优先 Hex Shield / Radar Target / Circuit Core（几何最简、无细碎笔画）。
+    </div>
+  </section>
+
+  <!-- ==========================================================
+       PART 02 · BRANDBAR
+       ========================================================== -->
+  <section class="part" data-part="brandbar" id="brandbar">
+    <header><span class="pid">PART 02</span><h2>左上角品牌区 · 图标 + sentinel</h2></header>
+    <p class="note">
+      对应 <code>Sidebar.tsx:170-178</code> 与 <code>AdminLayout.tsx:447-457</code>，内容按你的要求简化为
+      <b>图标 + sentinel</b>（删除「AI 智能体 / Powered by AI / 管理后台 / Knowledge Console」）。
+      硬约束：侧边栏 280px，文字区实测 <b>208px</b>（280 − 24 内边距 − 40 图标 − 8 间距），右上角实时显示余量。
+    </p>
+    <div class="stage stage-bar" style="margin-bottom:14px">
+      <span class="stagetag">// 280px SIDEBAR · 1:1</span>
+      <div class="stagemeta"><span class="tg" id="barRoom">—</span><span class="tg cy" id="barTag">—</span></div>
+      <div class="simbar">
+        <div class="mk" id="barMark"></div>
+        <div class="txtbox" id="barText" style="width:208px"></div>
+      </div>
+    </div>
+    <div class="grid g3" id="barFxGrid"></div>
+    <div class="tip ok">
+      <b>已解掉的两个坑：</b>① 科技字体不含中文字形，原先遇到「智能体」会 fallback 雅黑导致气质割裂，
+      现在纯英文 <code>sentinel</code> 字体可任意选；② 8 个字符撑不满 208px，
+      原先必然溢出的超宽字体（Michroma / Syncopate）现在可用，字号也从 16px 提到 24px。
+    </div>
+  </section>
+
+  <!-- ==========================================================
+       PART 03 · HERO
+       ========================================================== -->
+  <section class="part" data-part="hero" id="hero">
+    <header><span class="pid">PART 03</span><h2>首屏艺术字 · 卡通弹跳（已定稿）</h2></header>
+    <p class="note">
+      对应 <code>WelcomeScreen.tsx</code>。<b>已定稿：Fredoka 圆润卡通体 × Squash 完整弹跳。</b>
+      配联动落地阴影（起跳时缩小变淡、落地时放大变深）—— 这是「弹」与「飘」的区别。
+      配色已同步为新 tokens（青蓝紫渐变），与图标同源。
+    </p>
+    <div class="stage stage-hero" style="margin-bottom:14px">
+      <span class="stagetag">// HERO WORDMARK</span>
+      <div class="stagemeta"><span class="tg cy" id="heroTg">—</span></div>
+      <div id="heroMain"></div>
+    </div>
+    <div class="grid g3" id="heroFxGrid"></div>
+    <div class="tip">
+      <b>与首屏刻意区分：</b>左上角用「光、电、数据流」的科技语言（Holo / Glitch / Circuit），
+      首屏用「物理弹跳」的卡通语言。两处气质不同但配色同源，靠配色统一、靠动效区分。
+    </div>
+  </section>
+
+  <!-- ==========================================================
+       PART 04 · BACKGROUND
+       ========================================================== -->
+  <section class="part" data-part="background" id="background">
+    <header><span class="pid">PART 04</span><h2>页面背景 · Tech Background</h2></header>
+    <p class="note">
+      现状：三处各自铺静态 PNG（<code>MainLayout.tsx</code> / <code>LoginPage.tsx</code> /
+      <code>globals.css:297</code>），零动效。下方为替代方案，配色全部对齐图标渐变。
+      <b>务必开「叠加内容」检验可读性</b> —— 聊天区是长时阅读场景，背景不能干扰文字。
+    </p>
+    <div class="stage stage-bg" style="margin-bottom:14px">
+      <span class="stagetag">// BACKGROUND PREVIEW</span>
+      <div class="stagemeta"><span class="tg" id="bgTag">—</span></div>
+      <div class="fx" id="bgMain" style="position:absolute;inset:0"></div>
+      <div id="bgSample" style="display:none;position:absolute;inset:0;z-index:5;
+           align-items:center;justify-content:center;padding:30px">
+        <div style="width:100%;max-width:440px">
+          <div class="compbub ai">已为你检索到 3 篇相关文档，涉及部署架构与配置说明。</div>
+          <div class="compbub me">帮我总结一下部署步骤</div>
+          <div class="compbub ai">部署分为三步：配置环境变量、初始化数据库、启动服务。</div>
+          <div class="compbub hint">↑ 检验：文字与气泡是否仍然清晰</div>
+        </div>
+      </div>
+    </div>
+    <div class="ctl" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;align-items:center">
+      <button class="btn" id="bgSampleBtn">叠加内容：关</button>
+      <label class="lbl">强度 <input type="range" id="bgInt" min="0" max="150" value="100"><b id="bgIntV">1.00×</b></label>
+    </div>
+    <div class="grid g3" id="bgGrid"></div>
+    <div class="tip">
+      <b>可读性分级：</b><span class="tg ok">✓ 低干扰</span> 可直接用于聊天区；
+      <span class="tg wn">△ 中干扰</span> 建议仅登录页/欢迎页；
+      <span class="tg bd">✗ 高干扰</span> 只作装饰，聊天区禁用。
+    </div>
+  </section>
+
+  <!-- ==========================================================
+       PART 05 · COMPOSITE
+       ========================================================== -->
+  <section class="part" data-part="composite" id="composite">
+    <header><span class="pid">PART 05</span><h2>合成预览 · 真实页面模拟</h2></header>
+    <p class="note">
+      把当前选中的<b>图标 + 品牌区字标 + 背景</b>合成为完整页面，检验三者配色是否协调。
+      切换前面任意栏的选择，这里会同步更新。
+    </p>
+    <div class="ctl" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;align-items:center">
+      <button class="btn" id="btnGuide2">对齐辅助线</button>
+      <label class="lbl">高亮框偏移 <input type="range" id="navR" min="-24" max="24" value="-10"><b id="navV">-10.0px</b></label>
+      <label class="lbl">图标光学微调 <input type="range" id="optR" min="-24" max="24" value="12"><b id="optV">+12.0px</b></label>
+      <span style="font-family:var(--ff-mono);font-size:10px;color:var(--sx-faint)" id="optCalc">—</span>
+    </div>
+
+    <div class="comp">
+      <div class="bg" id="compBg"></div>
+      <div class="legend" style="display:none">
+        <i class="r">━ 红线 高亮框左缘（「高亮框偏移」滑块可调）</i>
+        <i class="c">━ 青线 图标图形左缘（「图标光学微调」滑块可调）</i>
+        <i style="color:var(--sx-dim);margin-top:2px">两线重合 = 对齐</i>
+      </div>
+      <div class="ui">
+        <aside class="side">
+          <div class="bar">
+            <div class="mk" id="compMark"></div>
+            <div class="txtbox" id="compText"></div>
+          </div>
+          <div class="nav" id="compNav"></div>
+        </aside>
+        <div class="body">
+          <div class="top">会话标题 · 部署问题咨询</div>
+          <div class="mid">
+            <div style="width:100%;max-width:480px">
+              <div class="compbub ai">已为你检索到 3 篇相关文档，涉及部署架构与配置说明。</div>
+              <div class="compbub me">帮我总结一下部署步骤</div>
+              <div class="compbub ai">部署分为三步：配置环境变量、初始化数据库、启动服务。</div>
+            </div>
+          </div>
+          <div class="btm">
+            <div class="input"><span>输入你的问题…</span><b>SEND</b></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <h3 style="margin:22px 0 4px;font-family:var(--ff-display);font-size:13px;font-weight:700;letter-spacing:.03em">
+      功能区高亮风格
+    </h3>
+    <p class="note" style="margin-bottom:12px">
+      重新设计的导航区：加了<b>分组标题</b>与<b>行内图标</b>，层次更清晰；下方 5 种高亮风格可切换。
+      切换风格不影响对齐 —— 对齐的是<b>高亮框的左边缘</b>，与填充样式无关。
+    </p>
+    <div class="grid g3" id="navStyleGrid"></div>
+
+    <div class="tip ok">
+      <b>协调性检查点：</b>① 图标与字标渐变是否同源；② 背景辉光色是否与图标强调色冲突；
+      ③ 侧边栏半透明底能否压住背景、保证文字可读。<br/>
+      <b>✓ 已定稿（用户确认）：</b><code>高亮框偏移 = −10px（沿用既定值不变）</code>、
+      <code>图标光学微调 = +12px（图形左缘 24px）</code>、
+      <code>高亮风格 = Notch 切角</code>。滑块已同步，范围 ±24px 便于后续微调。<br/>
+      <b>坐标含义：</b>红线（高亮框左缘）= 12px + 高亮框偏移 = <b>2px</b>；
+      青线（图标可见图形左缘）= 12px + 图标光学微调 = <b>24px</b>（留白补偿 <code>−(40×pad)</code> 已内建）。
+      两者相距 22px，是刻意保留的层次，并非未对齐。<br/>
+      <b>辅助线用法：</b>点「对齐辅助线」，两条线均可拖动，读数实时显示偏差。
+    </div>
+  </section>
+
+</main>
+
+<script>
+(function(){
+"use strict";
+
+/* ==========================================================================
+   数据区 —— 后续增删部件，只改这里的数组
+   ========================================================================== */
+var uid = 0;
+var U = function(){ return 'u' + (++uid); };
+
+/* ---------- ICONS（新增图标：在此数组加一项） ---------- */
+function grad(u){
+  return '<linearGradient id="g'+u+'" x1="0" y1="0" x2="1" y2="1">'+
+         '<stop offset="0" stop-color="#22D3EE"/><stop offset="0.48" stop-color="#3B82F6"/>'+
+         '<stop offset="1" stop-color="#7C3AED"/></linearGradient>';
+}
+/* pad = 图形左留白占 viewBox(64) 的比例。
+   用于光学补偿：让「可见图形边缘」而不是「SVG 容器边缘」对齐高亮框。
+   图标 DOM 左缘在 12px，但图形因留白会偏右 40*pad px，
+   故 margin-left = -(40 * pad)，把图形拉回到 12px。
+   新增图标时按 图形最左x / 64 填写即可。 */
+var ICONS = [
+{ id:'hex', name:'Hex Shield', tag:'六边盾', pad:0.172, desc:'六边形 + 内嵌电路，六边形是最强的科技符号，16px 下依然可辨。',
+  svg:function(){
+    var u=U();
+    return '<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">'+
+      '<defs>'+grad(u)+'<clipPath id="c'+u+'"><path d="M32 7 L53 19 V41 L32 53 L11 41 V19 Z"/></clipPath></defs>'+
+      '<g class="mk-float">'+
+        '<path d="M32 7 L53 19 V41 L32 53 L11 41 V19 Z" fill="url(#g'+u+')"/>'+
+        '<path d="M32 7 L53 19 V26 L32 38 L11 26 V19 Z" fill="#fff" opacity=".12"/>'+
+        '<g clip-path="url(#c'+u+')"><rect class="mk-scan" x="8" y="16" width="48" height="2.4" fill="#E0F7FA" opacity=".95"/></g>'+
+        '<path d="M32 7 L53 19 V41 L32 53 L11 41 V19 Z" fill="none" stroke="#fff" stroke-opacity=".28" stroke-width="1.6"/>'+
+        '<path class="mk-trace" d="M20 30 L26 30 L29 25 L35 35 L38 30 L44 30" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>'+
+      '</g></svg>';
+  }},
+{ id:'radar', name:'Radar Target', tag:'雷达准星', pad:0.063, desc:'同心雷达 + 旋转扇形 + 锁定光点，最贴「哨兵」语义：监视、预警。',
+  svg:function(){
+    var u=U();
+    return '<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">'+
+      '<defs>'+grad(u)+'</defs>'+
+      '<g class="mk-float">'+
+        '<circle cx="32" cy="32" r="26" fill="url(#g'+u+')"/>'+
+        '<circle cx="32" cy="32" r="26" fill="none" stroke="#fff" stroke-opacity=".22" stroke-width="1.4"/>'+
+        '<circle cx="32" cy="32" r="17" fill="none" stroke="#fff" stroke-opacity=".28" stroke-width="1.4"/>'+
+        '<circle cx="32" cy="32" r="8" fill="none" stroke="#fff" stroke-opacity=".34" stroke-width="1.4"/>'+
+        '<g class="mk-spin"><path d="M32 32 L32 6 A26 26 0 0 1 50 14 Z" fill="#fff" opacity=".2"/></g>'+
+        '<path d="M32 4 L32 12 M32 52 L32 60 M4 32 L12 32 M52 32 L60 32" stroke="#fff" stroke-opacity=".7" stroke-width="2" stroke-linecap="round"/>'+
+        '<circle class="mk-blink" cx="45" cy="21" r="3.2" fill="#E0F7FA"/>'+
+      '</g></svg>';
+  }},
+{ id:'circuit', name:'Circuit Core', tag:'电路核心', pad:0.094, desc:'芯片封装 + 引脚 + 流动电路，语义最准（AI 计算核心）。',
+  svg:function(){
+    var u=U();
+    return '<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">'+
+      '<defs>'+grad(u)+'</defs>'+
+      '<g class="mk-float">'+
+        '<path d="M20 6 L20 14 M32 6 L32 14 M44 6 L44 14 M20 50 L20 58 M32 50 L32 58 M44 50 L44 58 '+
+         'M6 20 L14 20 M6 32 L14 32 M6 44 L14 44 M50 20 L58 20 M50 32 L58 32 M50 44 L58 44" '+
+         'stroke="#22D3EE" stroke-width="2.4" stroke-linecap="round" opacity=".7"/>'+
+        '<rect x="15" y="15" width="34" height="34" rx="7" fill="url(#g'+u+')"/>'+
+        '<rect x="15" y="15" width="34" height="34" rx="7" fill="none" stroke="#fff" stroke-opacity=".28" stroke-width="1.4"/>'+
+        '<path class="mk-trace" d="M22 32 L28 32 L30 25 L34 39 L36 32 L42 32" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>'+
+        '<circle cx="32" cy="32" r="2.6" fill="#fff" opacity=".9"/>'+
+      '</g></svg>';
+  }},
+{ id:'pyramid', name:'Holo Pyramid', tag:'全息棱锥', pad:0.125, desc:'等边三角 + 内部扫描，极简几何，气质冷峻。',
+  svg:function(){
+    var u=U();
+    return '<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">'+
+      '<defs>'+grad(u)+'<clipPath id="p'+u+'"><path d="M32 10 L56 50 L8 50 Z"/></clipPath></defs>'+
+      '<g class="mk-float">'+
+        '<path d="M32 10 L56 50 L8 50 Z" fill="url(#g'+u+')"/>'+
+        '<g clip-path="url(#p'+u+')"><rect class="mk-scan" x="6" y="14" width="52" height="2.2" fill="#E0F7FA" opacity=".9"/></g>'+
+        '<path d="M32 10 L56 50 L8 50 Z" fill="none" stroke="#fff" stroke-opacity=".3" stroke-width="1.6" stroke-linejoin="round"/>'+
+        '<path d="M32 10 L32 50" stroke="#fff" stroke-opacity=".2" stroke-width="1.2"/>'+
+        '<circle cx="32" cy="34" r="3.4" fill="#fff"/>'+
+        '<circle cx="32" cy="34" r="7" fill="none" stroke="#fff" stroke-opacity=".45" stroke-width="1.4"/>'+
+      '</g></svg>';
+  }},
+{ id:'orbit', name:'Orbit Ring', tag:'轨道环', pad:0.078, desc:'双环反向旋转 + 中心核心，有「系统在运转」的动态暗示。',
+  svg:function(){
+    var u=U();
+    return '<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">'+
+      '<defs>'+grad(u)+'</defs>'+
+      '<g class="mk-float">'+
+        '<circle class="mk-pulse" cx="32" cy="32" r="24" fill="none" stroke="#22D3EE" stroke-width="1.6"/>'+
+        '<g class="mk-spin"><ellipse cx="32" cy="32" rx="26" ry="10" fill="none" stroke="#22D3EE" stroke-width="2" stroke-dasharray="34 18" opacity=".9"/></g>'+
+        '<g class="mk-spin-rev"><ellipse cx="32" cy="32" rx="10" ry="26" fill="none" stroke="#A855F7" stroke-width="2" stroke-dasharray="26 20" opacity=".85"/></g>'+
+        '<circle cx="32" cy="32" r="12" fill="url(#g'+u+')"/>'+
+        '<circle cx="32" cy="32" r="12" fill="none" stroke="#fff" stroke-opacity=".35" stroke-width="1.2"/>'+
+        '<circle class="mk-blink" cx="32" cy="32" r="4.4" fill="#E0F7FA"/>'+
+      '</g></svg>';
+  }},
+{ id:'sigil', name:'Wave Sigil', tag:'波形徽记', pad:0.063, desc:'圆角方底 + 波形 + 外扩脉冲，沿用现有 favicon 轮廓，改造成本最低。',
+  svg:function(){
+    var u=U();
+    return '<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">'+
+      '<defs>'+grad(u)+'</defs>'+
+      '<g class="mk-float">'+
+        '<circle class="mk-pulse" cx="32" cy="32" r="27" fill="none" stroke="#A855F7" stroke-width="2"/>'+
+        '<rect x="6" y="6" width="52" height="52" rx="15" fill="url(#g'+u+')"/>'+
+        '<path d="M6 21 A15 15 0 0 1 21 6 L43 6 A15 15 0 0 1 58 21 Z" fill="#fff" opacity=".1"/>'+
+        '<path d="M20 26 L20 38 M27 20 L27 44 M34 24 L34 40 M41 28 L41 36" stroke="#fff" stroke-width="3" stroke-linecap="round"/>'+
+        '<path d="M8 50 L56 50" stroke="#fff" stroke-opacity=".28" stroke-width="1.4" stroke-linecap="round"/>'+
+      '</g></svg>';
+  }}
+];
+
+/* ---------- FONTS（科技字体，用于 PART 02） ---------- */
+var FONTS = [
+ {css:'"Orbitron",sans-serif', name:'Orbitron', tag:'经典科幻', d:'方形几何骨架，最正统的科幻招牌'},
+ {css:'"Chakra Petch",sans-serif', name:'Chakra Petch', tag:'窄身科技', d:'切角笔画，偏窄，208px 内最安全'},
+ {css:'"Rajdhani",sans-serif', name:'Rajdhani', tag:'方正紧凑', d:'高窄方正，小字号仍清晰'},
+ {css:'"Audiowide",sans-serif', name:'Audiowide', tag:'机械几何', d:'圆润机械感，比 Orbitron 温和'},
+ {css:'"Oxanium",sans-serif', name:'Oxanium', tag:'棱角未来', d:'锐利切角，速度感强'},
+ {css:'"Michroma",sans-serif', name:'Michroma', tag:'超宽科幻', d:'极宽，气场最强（去掉中文后可用）'}
+];
+
+/* ---------- FX（PART 02 科技动效） ---------- */
+var FX = [
+ {cls:'fx-holo', name:'Holo Scan', tag:'全息扫描', d:'白亮线自上而下扫过，最克制耐看，常驻不烦。', split:false},
+ {cls:'fx-glitch', name:'Glitch', tag:'故障', d:'每 5.6s 一次 RGB 分离抖动，频次已压到最低。', split:false},
+ {cls:'fx-flick', name:'Flicker', tag:'霓虹启辉', d:'灯管启辉式不规则闪烁，复古科技感。', split:false},
+ {cls:'fx-circ', name:'Circuit', tag:'逐段点亮', d:'从左到右通电式揭开，适合入场。', split:true},
+ {cls:'fx-pulse', name:'Pulse', tag:'数据脉冲', d:'3.2s 辉光呼吸，最安静。', split:false},
+ {cls:'fx-neon', name:'Neon', tag:'霓虹辉光', d:'常驻双层辉光，无扫动，最不干扰。', split:false}
+];
+
+/* ---------- BOUNCE（PART 03 卡通弹跳） ---------- */
+var BOUNCE = [
+ {cls:'b-squash', name:'Squash', tag:'完整弹跳', d:'下蹲→起跳拉长→落地压扁→两次余震，最像真实皮球。'},
+ {cls:'b-wave', name:'Wave', tag:'连续波浪', d:'无停顿连续起伏，逐字负延迟形成波浪，最活泼。'},
+ {cls:'b-jelly', name:'Jelly', tag:'果冻Q弹', d:'幅度最大、余震最多，软趴趴的果冻感。'},
+ {cls:'b-pop', name:'Pop', tag:'轻点克制', d:'大部分时间静止，偶尔轻弹一下。'}
+];
+
+/* ---------- NAVSTYLES（功能区高亮风格） ---------- */
+var NAVSTYLES=[
+ {id:'ns-bar',   name:'Accent Bar', tag:'左侧竖条', d:'左侧 2px 青色竖条 + 向右淡出的渐变背景。最经典克制，推荐。'},
+ {id:'ns-glow',  name:'Glow Slab',  tag:'辉光块',   d:'整块辉光边框 + 内发光。最抢眼，强调当前位置。'},
+ {id:'ns-notch', name:'Notch',      tag:'切角',     d:'切角矩形 + 左侧竖条。HUD 军事风，与外层切角容器呼应。'},
+ {id:'ns-pill',  name:'Pill',       tag:'胶囊',     d:'圆角胶囊。柔和现代，但与整体切角语言略有冲突。'},
+ {id:'ns-ghost', name:'Ghost',      tag:'幽灵',     d:'无背景，仅文字变色 + 左侧发光小点。极简，最不干扰。'}
+];
+
+/* ---------- 功能区结构（分组 + 图标） ---------- */
+var NAV_ICON={
+  plus:'<path d="M12 5v14M5 12h14"/>',
+  hist:'<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  db:  '<ellipse cx="12" cy="6" rx="7.5" ry="2.8"/><path d="M4.5 6v12c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8V6"/><path d="M4.5 12c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8"/>',
+  gear:'<circle cx="12" cy="12" r="3"/><path d="M12 2.5v2.6M12 18.9v2.6M2.5 12h2.6M18.9 12h2.6M5.3 5.3l1.9 1.9M16.8 16.8l1.9 1.9M18.7 5.3l-1.9 1.9M7.2 16.8l-1.9 1.9"/>'
+};
+function navIcon(k){
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" '+
+         'stroke-linecap="round" stroke-linejoin="round">'+NAV_ICON[k]+'</svg>';
+}
+var NAV_GROUPS=[
+  {g:'工作区', items:[{i:'plus', t:'新建对话', act:true}]},
+  {g:'会话',   items:[{i:'hist', t:'历史会话'}]},
+  {g:'资源',   items:[{i:'db',   t:'知识库'}]},
+  {g:'系统',   items:[{i:'gear', t:'设置'}]}
+];
+
+/* ---------- BGS（背景方案） ---------- */
+function hexPat(u){
+  return '<svg xmlns="http://www.w3.org/2000/svg"><defs><pattern id="hp'+u+'" width="30" height="52" patternUnits="userSpaceOnUse">'+
+    '<path d="M15 0 L30 8.66 L30 25.98 L15 34.64 L0 25.98 L0 8.66 Z" fill="none" stroke="rgba(34,211,238,.22)" stroke-width="1"/>'+
+    '<path d="M30 25.98 L45 34.64 M0 25.98 L-15 34.64" fill="none" stroke="rgba(34,211,238,.22)" stroke-width="1"/>'+
+    '</pattern></defs><rect width="100%" height="100%" fill="url(#hp'+u+')"/></svg>';
+}
+function circSvg(){
+  var base='<g class="base">'+
+    '<path d="M0 60 H180 V150 H340 V70 H520 V200 H700 V110 H900 V180 H1100 V90 H1300"/>'+
+    '<path d="M0 260 H220 V340 H420 V280 H640 V380 H860 V300 H1080 V370 H1300"/>'+
+    '<path d="M0 460 H160 V530 H380 V470 H600 V560 H820 V490 H1040 V550 H1300"/>'+
+    '<path d="M120 0 V600 M420 0 V600 M760 0 V600 M1080 0 V600"/></g>';
+  var ps=['M0 60 H180 V150 H340 V70 H520 V200 H700 V110 H900 V180 H1100 V90 H1300',
+          'M0 260 H220 V340 H420 V280 H640 V380 H860 V300 H1080 V370 H1300',
+          'M0 460 H160 V530 H380 V470 H600 V560 H820 V490 H1040 V550 H1300',
+          'M120 0 V600','M760 0 V600'];
+  var flow='';
+  for(var i=0;i<ps.length;i++){ flow+='<path class="flow" d="'+ps[i]+'" style="animation-delay:'+(i*0.9)+'s"/>'; }
+  var ns=[[180,150],[520,200],[900,180],[420,280],[860,300],[160,530],[600,560],[1080,550]],node='';
+  for(var j=0;j<ns.length;j++){ node+='<circle class="node" cx="'+ns[j][0]+'" cy="'+ns[j][1]+'" r="2.4" style="animation-delay:'+(j*0.35)+'s"/>'; }
+  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1300 600" preserveAspectRatio="xMidYMid slice">'+base+flow+node+'</svg>';
+}
+var BGS = [
+{ id:'aurora', name:'Aurora Deep', tag:'深空极光', contrast:'ok', type:'CSS',
+  d:'青紫光斑缓慢漂移 + 细网格，气质从容，最不干扰阅读。',
+  html:function(){ return '<div class="bg-aurora"><i></i><i></i><i></i><div class="mesh"></div></div>'; },
+  fit:'聊天区 · 全站' },
+{ id:'pgrid', name:'Perspective Grid', tag:'透视网格', contrast:'wn', type:'CSS',
+  d:'地平线网格持续推进 + 星点闪烁，冲击最强。',
+  html:function(){ return '<div class="bg-pgrid"><div class="st"></div><div class="gl"></div><div class="fl"></div><div class="hz"></div></div>'; },
+  fit:'登录页 · 欢迎页' },
+{ id:'hex', name:'Hex Mesh', tag:'六边蜂窝', contrast:'ok', type:'CSS',
+  d:'蜂窝网络缓慢平移 + 呼吸辉光，贴「知识图谱」语义。',
+  html:function(){ return '<div class="bg-hex"><div class="hg"></div>'+hexPat(U())+'</div>'; },
+  fit:'后台 · 图谱页' },
+{ id:'circ', name:'Circuit Trace', tag:'电路走线', contrast:'ok', type:'CSS',
+  d:'PCB 走线 + 光点沿线流动 + 节点依次亮起。',
+  html:function(){ return '<div class="bg-circ">'+circSvg()+'</div>'; },
+  fit:'后台 · 登录页' },
+{ id:'scan', name:'Scan Grid', tag:'扫描网格', contrast:'ok', type:'CSS',
+  d:'下扫亮线 + 四角压暗，监视器质感，暗合「哨兵巡视」。',
+  html:function(){ return '<div class="bg-scan"><div class="bl"></div><div class="g"></div><div class="bm"></div><div class="ln"></div><div class="vg"></div></div>'; },
+  fit:'后台监控 · 聊天区' },
+{ id:'neural', name:'Neural Network', tag:'神经网络', contrast:'ok', type:'Canvas',
+  d:'点阵自动连线，鼠标靠近时节点聚集，交互性最强。',
+  canvas:'neural', fit:'登录页 · 欢迎页' },
+{ id:'particle', name:'Particle Field', tag:'粒子场', contrast:'ok', type:'Canvas',
+  d:'缓慢上浮光点 + 视差，Canvas 方案里唯一适合阅读场景。',
+  canvas:'particle', fit:'聊天区 · 全站' },
+{ id:'rain', name:'Data Rain', tag:'数据雨', contrast:'bd', type:'Canvas',
+  d:'字符列下落（青紫低密度），运动感强，聊天区禁用。',
+  canvas:'rain', fit:'仅装饰区' }
+];
+
+/* ==========================================================================
+   状态
+   ========================================================================== */
+var state = {
+  icon: ICONS[0],
+  font: FONTS[0],
+  fx:   FX[0],
+  bounce: BOUNCE[0],
+  bg:   BGS[0],
+  nav:  NAVSTYLES[2]     /* 已定稿：Notch 切角 */
+};
+var WORD = 'sentinel';
+var HERO_WORD = 'Sentinel';
+
+/* 侧边栏几何（改 gap 或图标尺寸时，同步改这里）
+   280(侧边栏) - 24(左右 padding) - 40(图标) - 8(icon/文字间距) = 208 */
+var BAR_GAP = 8;
+var BAR_W   = 208;
+var MARK_SIZE = 40;        /* 图标尺寸 */
+var SIDE_PAD  = 12;        /* 侧边栏 padding = 高亮框左缘基准 */
+/* ===== 已定稿（用户确认）=====
+   高亮框偏移 = -10px（沿用既定值，保持不变）→ 高亮框左缘落在 2px
+   图标光学微调 = +12px → 图标可见图形左缘落在 24px
+   两者相距 22px，是刻意保留的层次，请勿自动"修正"为重合。
+   注：图标基准含自动留白补偿（-(40×pad)），此处的 12 是在补偿之后的再偏移。 */
+var opticalNudge = 12;     /* 图标光学微调（px），滑块控制 */
+var navNudge     = -10;    /* 高亮框左缘偏移（px），滑块控制 */
+
+/* 计算图标 margin-left：抵消 SVG 左留白，使「可见图形左缘」落在 SIDE_PAD */
+function markOffset(ic){
+  return -(MARK_SIZE * (ic.pad || 0)) + opticalNudge;
+}
+/* 把补偿应用到指定的图标容器 */
+function applyMarkOffset(el, ic){
+  if(el) el.style.marginLeft = markOffset(ic).toFixed(2) + 'px';
+}
+
+/* ==========================================================================
+   Canvas 引擎（背景用）
+   ========================================================================== */
+/* Canvas 按「槽位」管理，互不干扰：
+   main  = PART 04 主预览；comp = PART 05 合成；thumb-N = 各缩略图 */
+var cvSlots = {};
+function setCanvas(key, host, kind, animate){
+  if(cvSlots[key]){ cvSlots[key].destroy(); delete cvSlots[key]; }
+  if(kind && host){ cvSlots[key] = makeCanvas(host, kind, animate); }
+}
+function killThumbs(){
+  Object.keys(cvSlots).forEach(function(k){
+    if(k.indexOf('thumb-')===0){ cvSlots[k].destroy(); delete cvSlots[k]; }
+  });
+}
+function makeCanvas(host, kind, animate){
+  var cv = document.createElement('canvas');
+  cv.style.position='absolute';
+  cv.style.top='0'; cv.style.left='0';
+  cv.style.display='block';
+  host.appendChild(cv);
+  var ctx = cv.getContext('2d');
+  var W=0,H=0,DPR=Math.min(window.devicePixelRatio||1,2);
+  var raf=null,t0=0,last=0,active=true,speed=1;
+  var objs=[],mouse={x:-9999,y:-9999};
+
+  function resize(){
+    var r=host.getBoundingClientRect();
+    W=Math.max(1,Math.round(r.width)); H=Math.max(1,Math.round(r.height));
+    cv.width=W*DPR; cv.height=H*DPR;
+    cv.style.width=W+'px'; cv.style.height=H+'px';
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    init();
+  }
+  function init(){
+    objs=[];
+    if(kind==='neural'){
+      var n=Math.max(16,Math.min(70,Math.round(W*H/12000)));
+      for(var i=0;i<n;i++) objs.push({x:Math.random()*W,y:Math.random()*H,
+        vx:(Math.random()-.5)*.22,vy:(Math.random()-.5)*.22,r:Math.random()*1.4+1});
+    }else if(kind==='rain'){
+      var cols=Math.max(8,Math.floor(W/26));
+      for(var c=0;c<cols;c++){
+        var len=Math.floor(Math.random()*9+5),ch=[];
+        for(var m=0;m<len;m++) ch.push(POOL[Math.floor(Math.random()*POOL.length)]);
+        objs.push({x:c*26+13,y:Math.random()*-H,sp:Math.random()*.8+.35,len:len,ch:ch});
+      }
+    }else{
+      var pn=Math.max(14,Math.min(52,Math.round(W*H/16000)));
+      for(var p=0;p<pn;p++) objs.push({x:Math.random()*W,y:Math.random()*H,
+        r:Math.random()*2+.6,vy:-(Math.random()*.15+.05),o:Math.random()*.45+.22,ph:Math.random()*6.28});
+    }
+  }
+  var POOL='01<>[]{}/\\|=+*#$%&@ABCDEF';
+  function rnd(){ return POOL[Math.floor(Math.random()*POOL.length)]; }
+
+  function step(dt){
+    ctx.clearRect(0,0,W,H);
+    if(kind==='neural'){
+      for(var i=0;i<objs.length;i++){
+        var o=objs[i];
+        o.x+=o.vx*dt*speed; o.y+=o.vy*dt*speed;
+        if(o.x<0||o.x>W) o.vx*=-1;
+        if(o.y<0||o.y>H) o.vy*=-1;
+      }
+      var MAX=Math.min(140,W*.22);
+      for(var a=0;a<objs.length;a++){
+        for(var b=a+1;b<objs.length;b++){
+          var dx=objs[a].x-objs[b].x, dy=objs[a].y-objs[b].y;
+          var dd=Math.sqrt(dx*dx+dy*dy);
+          if(dd<MAX){
+            ctx.strokeStyle='rgba(34,211,238,'+(0.26*(1-dd/MAX))+')';
+            ctx.lineWidth=1;
+            ctx.beginPath(); ctx.moveTo(objs[a].x,objs[a].y); ctx.lineTo(objs[b].x,objs[b].y); ctx.stroke();
+          }
+        }
+      }
+      for(var j=0;j<objs.length;j++){
+        var p=objs[j];
+        var dm=Math.sqrt((p.x-mouse.x)*(p.x-mouse.x)+(p.y-mouse.y)*(p.y-mouse.y));
+        var near=dm<110;
+        ctx.fillStyle= near?'rgba(224,247,250,.95)':'rgba(34,211,238,.6)';
+        ctx.beginPath(); ctx.arc(p.x,p.y,near?p.r*1.6:p.r,0,6.2832); ctx.fill();
+      }
+    }else if(kind==='rain'){
+      ctx.font='13px "JetBrains Mono",monospace';
+      for(var c2=0;c2<objs.length;c2++){
+        var col=objs[c2];
+        col.y+=col.sp*dt*speed*1.6;
+        if(col.y>H+col.len*17) col.y=-Math.random()*280;
+        if(Math.random()<0.06) col.ch[Math.floor(Math.random()*col.len)]=rnd();
+        for(var m2=0;m2<col.len;m2++){
+          var y=col.y-m2*17;
+          if(y<-20||y>H+20) continue;
+          var al=(1-m2/col.len)*0.4;
+          if(m2===0) al=0.85;
+          ctx.fillStyle= m2===0 ? 'rgba(224,247,250,'+al+')' : 'rgba(34,211,238,'+al+')';
+          ctx.fillText(col.ch[m2],col.x,y);
+        }
+      }
+    }else{
+      for(var i2=0;i2<objs.length;i2++){
+        var q=objs[i2];
+        q.y+=q.vy*dt*speed;
+        if(q.y<-10){ q.y=H+10; q.x=Math.random()*W; }
+        var wob=Math.sin((t0/1000)*0.7+q.ph)*6;
+        var g=ctx.createRadialGradient(q.x+wob,q.y,0,q.x+wob,q.y,q.r*4.5);
+        g.addColorStop(0,'rgba(34,211,238,'+q.o+')');
+        g.addColorStop(1,'rgba(34,211,238,0)');
+        ctx.fillStyle=g;
+        ctx.beginPath(); ctx.arc(q.x+wob,q.y,q.r*4.5,0,6.2832); ctx.fill();
+      }
+    }
+  }
+  function loop(ts){
+    if(!active) return;
+    var dt = last ? Math.min(34, ts-last) : 16;
+    last = ts; t0 += dt;
+    step(dt/16.67);
+    raf = requestAnimationFrame(loop);
+  }
+  function onMove(e){ var r=cv.getBoundingClientRect(); mouse.x=e.clientX-r.left; mouse.y=e.clientY-r.top; }
+  function onLeave(){ mouse.x=-9999; mouse.y=-9999; }
+  function onVis(){
+    active=!document.hidden;
+    if(active){ last=0; raf=requestAnimationFrame(loop); } else { cancelAnimationFrame(raf); }
+  }
+  cv.addEventListener('mousemove',onMove);
+  cv.addEventListener('mouseleave',onLeave);
+  host.addEventListener('mousemove',onMove);
+  host.addEventListener('mouseleave',onLeave);
+  document.addEventListener('visibilitychange',onVis);
+  var ro=null;
+  if(window.ResizeObserver){ ro=new ResizeObserver(resize); ro.observe(host); }
+  else window.addEventListener('resize',resize);
+
+  resize();
+  if(animate){ raf=requestAnimationFrame(loop); }
+  else { for(var w=0;w<80;w++){ t0+=16.7; step(1); } }
+
+  return {
+    destroy:function(){
+      active=false; cancelAnimationFrame(raf);
+      cv.removeEventListener('mousemove',onMove); cv.removeEventListener('mouseleave',onLeave);
+      host.removeEventListener('mousemove',onMove); host.removeEventListener('mouseleave',onLeave);
+      document.removeEventListener('visibilitychange',onVis);
+      if(ro) ro.disconnect(); else window.removeEventListener('resize',resize);
+      if(cv.parentNode) cv.parentNode.removeChild(cv);
+    }
+  };
+}
+
+/* ==========================================================================
+   渲染函数
+   ========================================================================== */
+/* --- 字标构建（PART 02） --- */
+function buildWord(text, fx){
+  var html='';
+  if(fx.split){
+    for(var i=0;i<text.length;i++){
+      var c = text[i]===' ' ? '\u00A0' : text[i];
+      html += '<span class="ch" style="--i:'+i+'"><span class="tx">'+c+'</span></span>';
+    }
+  }else{
+    html = '<span class="tx">'+text.replace(/ /g,'\u00A0')+'</span>';
+  }
+  return '<div class="wm '+fx.cls+'" data-text="'+text+'" aria-label="'+text+'" style="--wm-size:24px">'+html+'</div>';
+}
+/* --- 弹跳字标（PART 03） --- */
+function buildHero(text, bounce){
+  var html='';
+  for(var i=0;i<text.length;i++){
+    var c = text[i]===' ' ? '\u00A0' : text[i];
+    html += '<span class="ch" style="--i:'+i+'"><span class="ch-txt">'+c+'</span><span class="ch-sh"></span></span>';
+  }
+  return '<div class="wmc '+bounce.cls+'">'+html+'</div>';
+}
+
+/* --- PART 00 色板 --- */
+function renderSwatches(){
+  var S=[
+    ['#22D3EE','--sx-cyan','电光青 · 主强调'],
+    ['#38BDF8','--sx-sky','天蓝'],
+    ['#3B82F6','--sx-blue','科技蓝'],
+    ['#6366F1','--sx-indigo','靛蓝'],
+    ['#7C3AED','--sx-violet','品牌紫'],
+    ['#A855F7','--sx-purple','亮紫'],
+    ['#04070F','--sx-void','深空底'],
+    ['#0D1426','--sx-card','卡片底']
+  ];
+  var box=document.getElementById('swatches'),html='';
+  S.forEach(function(s){
+    html+='<div class="sw"><div class="chip" style="background:'+s[0]+'"></div>'+
+          '<div class="meta"><p>'+s[2]+'</p><p>'+s[1]+'<br>'+s[0]+'</p></div></div>';
+  });
+  /* 渐变样本 */
+  html+='<div class="sw" style="min-width:180px"><div class="chip" style="background:'+
+        'linear-gradient(135deg,#22D3EE,#3B82F6 48%,#7C3AED)"></div>'+
+        '<div class="meta"><p>主渐变（图标/字标同源）</p><p>--sx-grad</p></div></div>';
+  box.innerHTML=html;
+}
+
+/* --- PART 01 图标 --- */
+function renderIconMain(){
+  document.getElementById('iconMain').innerHTML = state.icon.svg();
+  document.getElementById('iconTag').textContent = state.icon.name + ' · ' + state.icon.tag;
+}
+function renderIconGrid(){
+  var g=document.getElementById('iconGrid'); g.innerHTML='';
+  ICONS.forEach(function(ic){
+    var c=document.createElement('article');
+    c.className='card'+(ic===state.icon?' on':'');
+    c.innerHTML='<p class="n">'+ic.name+'<em>'+ic.tag+'</em></p><p class="d">'+ic.desc+'</p>'+
+      '<div class="stage" style="height:96px;margin-bottom:9px;background:#04070F">'+
+      '<div style="width:58px;height:58px">'+ic.svg()+'</div></div>'+
+      '<button class="pick">应用此图标</button>';
+    c.querySelector('.pick').addEventListener('click',function(){
+      state.icon=ic;
+      renderIconMain(); renderIconGrid(); renderBar(); renderComposite();
+    });
+    g.appendChild(c);
+  });
+}
+
+/* --- PART 02 品牌区 --- */
+function renderBar(){
+  document.getElementById('barMark').innerHTML = state.icon.svg();
+  applyMarkOffset(document.getElementById('barMark'), state.icon);
+  var t=document.getElementById('barText');
+  t.innerHTML = buildWord(WORD, state.fx);
+  var wmEl=t.querySelector('.wm');
+  if(wmEl){ wmEl.style.setProperty('--ff-display', state.font.css); wmEl.style.fontFamily=state.font.css; }
+  document.getElementById('barTag').textContent = state.font.name + ' · ' + state.fx.name;
+  requestAnimationFrame(function(){
+    var w=wmEl?Math.ceil(wmEl.scrollWidth):0;
+    var room=BAR_W-w;
+    var el=document.getElementById('barRoom');
+    el.textContent = room>=0 ? ('余 '+room+'px') : ('超 '+(-room)+'px');
+    el.className = 'tg ' + (room>=0?'ok':'bd');
+  });
+}
+function renderBarFxGrid(){
+  var g=document.getElementById('barFxGrid'); g.innerHTML='';
+  FX.forEach(function(fx){
+    var c=document.createElement('article');
+    c.className='card'+(fx===state.fx?' on':'');
+    c.innerHTML='<p class="n">'+fx.name+'<em>'+fx.tag+'</em></p><p class="d">'+fx.d+'</p>'+
+      '<div class="stage" style="height:66px;margin-bottom:9px;background:#04070F"><div class="txtbox">'+
+      '<div class="wm '+fx.cls+'" data-text="sentinel" style="--wm-size:20px;font-family:'+state.font.css+'">'+
+      (fx.split?'<span class="ch" style="--i:0"><span class="tx">s</span></span>'+
+                '<span class="ch" style="--i:1"><span class="tx">e</span></span>'+
+                '<span class="ch" style="--i:2"><span class="tx">n</span></span>'+
+                '<span class="ch" style="--i:3"><span class="tx">t</span></span>'+
+                '<span class="ch" style="--i:4"><span class="tx">i</span></span>'+
+                '<span class="ch" style="--i:5"><span class="tx">n</span></span>'+
+                '<span class="ch" style="--i:6"><span class="tx">e</span></span>'+
+                '<span class="ch" style="--i:7"><span class="tx">l</span></span>'
+               :'<span class="tx">sentinel</span>')+
+      '</div></div></div>'+
+      '<button class="pick">应用此动效</button>';
+    c.querySelector('.pick').addEventListener('click',function(){
+      state.fx=fx; renderBar(); renderBarFxGrid(); renderComposite();
+    });
+    g.appendChild(c);
+  });
+}
+
+/* --- PART 03 Hero --- */
+function renderHero(){
+  document.getElementById('heroMain').innerHTML = buildHero(HERO_WORD, state.bounce);
+  document.getElementById('heroTg').textContent = 'Fredoka · ' + state.bounce.name;
+}
+function renderHeroFxGrid(){
+  var g=document.getElementById('heroFxGrid'); g.innerHTML='';
+  BOUNCE.forEach(function(b){
+    var c=document.createElement('article');
+    c.className='card'+(b===state.bounce?' on':'');
+    /* 卡片内用小字号展示 */
+    var inner='';
+    for(var i=0;i<HERO_WORD.length;i++){
+      inner+='<span class="ch" style="--i:'+i+'"><span class="ch-txt">'+HERO_WORD[i]+'</span><span class="ch-sh"></span></span>';
+    }
+    c.innerHTML='<p class="n">'+b.name+'<em>'+b.tag+'</em></p><p class="d">'+b.d+'</p>'+
+      '<div class="stage" style="height:74px;margin-bottom:9px;background:#04070F">'+
+      '<div class="wmc '+b.cls+'" style="--hero-size:26px">'+inner+'</div></div>'+
+      '<button class="pick">应用此弹跳</button>';
+    c.querySelector('.pick').addEventListener('click',function(){
+      state.bounce=b; renderHero(); renderHeroFxGrid();
+    });
+    g.appendChild(c);
+  });
+}
+
+/* --- PART 04 背景 --- */
+function paintBg(host, bg, animate, key){
+  host.innerHTML='';
+  if(key && key.indexOf('thumb-')!==0) host.className='fx';
+  setCanvas(key||'tmp', host, bg.canvas, animate);
+  if(!bg.canvas){ host.innerHTML=bg.html(); }
+}
+function renderBgMain(){
+  paintBg(document.getElementById('bgMain'), state.bg, true, 'main');
+  var m={'ok':['✓ 低干扰','ok'],'wn':['△ 中干扰','wn'],'bd':['✗ 高干扰','bd']};
+  var v=m[state.bg.contrast];
+  var el=document.getElementById('bgTag');
+  el.textContent = state.bg.name+' · '+v[0];
+  el.className='tg '+v[1];
+}
+function renderBgGrid(){
+  killThumbs();
+  var g=document.getElementById('bgGrid'); g.innerHTML='';
+  BGS.forEach(function(bg,bi){
+    var m={'ok':['低干扰','ok'],'wn':['中干扰','wn'],'bd':['高干扰','bd']};
+    var v=m[bg.contrast];
+    var c=document.createElement('article');
+    c.className='card'+(bg===state.bg?' on':'');
+    c.innerHTML='<p class="n">'+bg.name+'<em>'+bg.tag+'</em></p><p class="d">'+bg.d+'</p>'+
+      '<div class="stage" style="height:78px;margin-bottom:9px"><div class="fx" data-thumb></div></div>'+
+      '<div class="tagrow"><span class="tg '+(bg.type==='CSS'?'cy':'vi')+'">'+bg.type+'</span>'+
+      '<span class="tg '+v[1]+'">'+v[0]+'</span><span class="tg">'+bg.fit+'</span></div>'+
+      '<button class="pick">应用此背景</button>';
+    /* 缩略图：静态预热 80 帧后定格，不常驻 rAF */
+    paintBg(c.querySelector('[data-thumb]'), bg, false, 'thumb-'+bi);
+    c.querySelector('.pick').addEventListener('click',function(){
+      state.bg=bg; renderBgMain(); renderBgGrid(); renderComposite();
+    });
+    c.querySelector('.stage').addEventListener('click',function(){
+      state.bg=bg; renderBgMain(); renderBgGrid(); renderComposite();
+    });
+    g.appendChild(c);
+  });
+}
+
+/* 辅助线：
+   红(高亮框左缘) = SIDE_PAD + navNudge
+   青(图标图形左缘) = SIDE_PAD + marginLeft + 图形留白 */
+function updateGuides(){
+  var comp=document.querySelector('.comp');
+  if(!comp) return;
+  var off = markOffset(state.icon);                       /* margin-left，通常为负 */
+  var graphicLeft = SIDE_PAD + off + MARK_SIZE*(state.icon.pad||0);
+  var navLeft = SIDE_PAD + navNudge;
+  comp.style.setProperty('--guide-icon', graphicLeft.toFixed(2)+'px');
+  comp.style.setProperty('--nav-nudge', navNudge.toFixed(2)+'px');
+  var el=document.getElementById('optCalc');
+  if(el){
+    var diff = graphicLeft - navLeft;
+    el.textContent = '高亮框左缘 ' + navLeft.toFixed(1) + 'px　｜　' +
+      state.icon.name + ' 留白 ' + (MARK_SIZE*(state.icon.pad||0)).toFixed(1) +
+      'px → 图形左缘 ' + graphicLeft.toFixed(1) + 'px　｜　偏差 ' +
+      (diff>=0?'+':'') + diff.toFixed(1) + 'px' + (Math.abs(diff)<0.6?' ✓对齐':'');
+  }
+}
+/* 高亮框偏移：同时移动导航区与红线 */
+function updateNavOffset(){
+  var nav=document.getElementById('compNav');
+  if(nav) nav.style.marginLeft = navNudge.toFixed(2)+'px';
+  updateGuides();
+}
+/* 渲染功能区：分组标题 + 行内图标 */
+function renderNav(){
+  var nav=document.getElementById('compNav');
+  if(!nav) return;
+  var html='';
+  NAV_GROUPS.forEach(function(gr){
+    html+='<div class="navgroup">'+gr.g+'</div>';
+    gr.items.forEach(function(it){
+      html+='<div class="navitem'+(it.act?' act':'')+'">'+
+            navIcon(it.i)+'<span>'+it.t+'</span></div>';
+    });
+  });
+  nav.innerHTML=html;
+  applyNavStyle();
+  updateNavOffset();
+}
+/* 应用高亮风格（只切 class，不影响几何与对齐） */
+function applyNavStyle(){
+  var nav=document.getElementById('compNav');
+  if(!nav) return;
+  NAVSTYLES.forEach(function(s){ nav.classList.remove(s.id); });
+  nav.classList.add(state.nav.id);
+}
+/* 风格画廊 */
+function renderNavStyleGrid(){
+  var g=document.getElementById('navStyleGrid');
+  if(!g) return;
+  g.innerHTML='';
+  NAVSTYLES.forEach(function(s){
+    var c=document.createElement('article');
+    c.className='card'+(s===state.nav?' on':'');
+    c.innerHTML='<p class="n">'+s.name+'<em>'+s.tag+'</em></p><p class="d">'+s.d+'</p>'+
+      '<div class="stage" style="height:88px;margin-bottom:9px;background:#04070F;padding:10px">'+
+        '<div style="width:100%;max-width:170px" class="'+s.id+'">'+
+          '<div class="navitem act" style="margin:0">'+navIcon('plus')+'<span>新建对话</span></div>'+
+          '<div class="navitem" style="margin:2px 0 0">'+navIcon('hist')+'<span>历史会话</span></div>'+
+        '</div>'+
+      '</div>'+
+      '<button class="pick">应用此风格</button>';
+    c.querySelector('.pick').addEventListener('click',function(){
+      state.nav=s; applyNavStyle(); renderNavStyleGrid();
+    });
+    g.appendChild(c);
+  });
+}
+function refreshMarks(){
+  applyMarkOffset(document.getElementById('compMark'), state.icon);
+  applyMarkOffset(document.getElementById('barMark'), state.icon);
+  updateGuides();
+}
+
+/* --- PART 05 合成 --- */
+function renderComposite(){
+  document.getElementById('compMark').innerHTML = state.icon.svg();
+  applyMarkOffset(document.getElementById('compMark'), state.icon);
+  updateGuides();
+  var t=document.getElementById('compText');
+  t.innerHTML = buildWord(WORD, state.fx);
+  var wmEl=t.querySelector('.wm');
+  if(wmEl){ wmEl.style.fontFamily=state.font.css; wmEl.style.setProperty('--wm-size','22px'); }
+  var host=document.getElementById('compBg');
+  host.innerHTML='';
+  host.className='bg';
+  setCanvas('comp', host, state.bg.canvas, true);
+  if(!state.bg.canvas){ host.innerHTML=state.bg.html(); }
+}
+
+/* ==========================================================================
+   控件
+   ========================================================================== */
+function toggleGuides(){
+  var c=document.querySelector('.comp');
+  var on=c.classList.toggle('guides');
+  document.getElementById('btnGuide').classList.toggle('on',on);
+  document.getElementById('btnGuide2').classList.toggle('on',on);
+  updateGuides();
+  if(on) c.scrollIntoView({behavior:'smooth',block:'center'});
+}
+document.getElementById('btnGuide').addEventListener('click',toggleGuides);
+document.getElementById('btnGuide2').addEventListener('click',toggleGuides);
+
+/* 高亮框偏移滑块（移动红线 + 导航区） */
+var navR=document.getElementById('navR'), navV=document.getElementById('navV');
+navR.addEventListener('input',function(){
+  navNudge=parseFloat(this.value);
+  navV.textContent=(navNudge>0?'+':'')+navNudge.toFixed(1)+'px';
+  updateNavOffset();
+});
+/* 图标光学微调滑块（移动青线） */
+var optR=document.getElementById('optR'), optV=document.getElementById('optV');
+optR.addEventListener('input',function(){
+  opticalNudge = parseFloat(this.value);
+  optV.textContent = (opticalNudge>0?'+':'')+opticalNudge.toFixed(1)+'px';
+  refreshMarks();
+});
+document.getElementById('btnPause').addEventListener('click',function(){
+  var p=document.body.classList.toggle('paused');
+  this.textContent = p?'播放动效':'暂停动效';
+  this.classList.toggle('on',p);
+});
+document.getElementById('btnTop').addEventListener('click',function(){
+  window.scrollTo({top:0,behavior:'smooth'});
+});
+document.getElementById('bgSampleBtn').addEventListener('click',function(){
+  var s=document.getElementById('bgSample');
+  var on = s.style.display==='none';
+  s.style.display = on?'flex':'none';
+  this.textContent='叠加内容：'+(on?'开':'关');
+  this.classList.toggle('on',on);
+});
+var bgInt=document.getElementById('bgInt'), bgIntV=document.getElementById('bgIntV');
+bgInt.addEventListener('input',function(){
+  var v=this.value/100;
+  document.documentElement.style.setProperty('--intensity',v);
+  bgIntV.textContent=v.toFixed(2)+'×';
+});
+
+/* 导航高亮 */
+var navLinks=document.querySelectorAll('#nav a');
+var parts=[].slice.call(document.querySelectorAll('.part'));
+function onScroll(){
+  var y=window.scrollY+150, cur=null;
+  parts.forEach(function(p){
+    var top = p.getBoundingClientRect().top + window.scrollY;
+    if(top<=y) cur=p.id;
+  });
+  navLinks.forEach(function(a){ a.classList.toggle('cur', a.getAttribute('href')==='#'+cur); });
+}
+window.addEventListener('scroll',onScroll,{passive:true});
+
+/* ==========================================================================
+   初始化
+   ========================================================================== */
+renderSwatches();
+renderIconMain();
+renderIconGrid();
+renderBar();
+renderBarFxGrid();
+renderHero();
+renderHeroFxGrid();
+renderBgMain();
+renderBgGrid();
+renderComposite();
+renderNav();
+renderNavStyleGrid();
+onScroll();
+
+/* 字体加载完成后重测溢出 */
+if(document.fonts && document.fonts.ready){
+  document.fonts.ready.then(function(){ renderBar(); setTimeout(renderBar,300); });
+}
+})();
+</script>
+</body>
+</html>

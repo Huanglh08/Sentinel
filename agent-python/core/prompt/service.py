@@ -18,6 +18,8 @@ from __future__ import annotations
 from typing import Any
 
 from core.intent import NodeScore
+from core.guard.hardening import HARDENING_RULES
+from core.guard.rules import GUARD_ENABLED
 from core.prompt.context import PromptBuildPlan, PromptContext, PromptPlan
 from core.prompt.formatter import ContextFormatter
 from core.prompt.prompt_resolver import AgentPromptResolver, AgentPromptSlot
@@ -140,6 +142,9 @@ class RAGPromptService:
             rules = self.formatter.citation_rules()
             if rules:
                 body = body + "\n\n" + rules
+        # 红队防护第 2 层：安全行为守则（LlamaFirewall AlignmentCheck 的成本最优替代）
+        if GUARD_ENABLED:
+            body = body + HARDENING_RULES
         return body
 
     def build_structured_messages(

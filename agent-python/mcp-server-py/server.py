@@ -508,6 +508,133 @@ _maybe_register_youcom()
 
 
 # ---------------------------------------------------------------------------
+# 5) 风控关系图查询  graph_query  （Phase 4：一机多号 / 一层N层）
+# ---------------------------------------------------------------------------
+# 内存 mock 边数据，字段与 PG 边表 t_case_graph_edge 对齐
+# （upgrades/v1.1.0/260829_case_phase4_rules_graph.sql，含递归 CTE 示例）。
+# 真实化阶段：仅替换本工具内数据源为 PG 递归 CTE 查询，工具签名与返回文本格式
+# 保持不变，对调用方（Investigator）透明。
+_GRAPH_NODES = {
+    "account": ["A1001", "A1002", "A1003", "A1004", "B9001", "A2001"],
+    "device": ["D1001", "D1002", "D2001"],
+    "ip": ["IP8801"],
+    "order": ["O7001"],
+}
+_GRAPH_EDGES = [
+    # 一机多号团伙：设备 D1001 挂 3 个账号
+    ("device", "D1001", "same_device", "account", "A1001"),
+    ("device", "D1001", "same_device", "account", "A1002"),
+    ("device", "D1001", "same_device", "account", "A1003"),
+    # 资金归集：两个账号向同一收款卡转账
+    ("account", "A1001", "transfer", "account", "B9001"),
+    ("account", "A1002", "transfer", "account", "B9001"),
+    ("account", "A1003", "transfer", "account", "B9001"),
+    # 同 IP 关联：团伙边缘账号
+    ("account", "A1002", "same_ip", "ip", "IP8801"),
+    ("account", "A1004", "same_ip", "ip", "IP8801"),
+    # 一层扩展：A1004 归属另一设备 D1002（团伙第二设备）
+    ("device", "D1002", "same_device", "account", "A1004"),
+    # 对照组：正常单设备单账号
+    ("device", "D2001", "same_device", "account", "A2001"),
+]
+_GRAPH_REL_LABELS = {
+    "same_device": "同设备登录",
+    "same_ip": "同IP登录",
+    "transfer": "资金转账",
+}
+
+
+def _graph_bfs(entity_type: str, entity_id: str, relation: str | None, depth: int) -> list[dict]:
+    """从 (entity_type, entity_id) 出发的有界 BFS（双向边、防环、逐层扩展）。"""
+    results: list[dict] = []
+    visited: set[tuple[str, str]] = {(entity_type, entity_id)}
+    frontier = [(entity_type, entity_id)]
+    for level in range(1, depth + 1):
+        nxt: list[tuple[str, str]] = []
+        for st, si in frontier:
+            for row in _GRAPH_EDGES:
+                src_t, src_id, rel, dst_t, dst_id = row
+                # 双向匹配：正向 src->dst / 反向 dst->src
+                if (st, si) == (src_t, src_id):
+                    other = (dst_t, dst_id)
+                    hop_rel, direction = rel, "out"
+                elif (st, si) == (dst_t, dst_id):
+                    other = (src_t, src_id)
+                    hop_rel, direction = rel, "in"
+                else:
+                    continue
+                if relation and rel != relation:
+                    continue
+                if other in visited:
+                    continue
+                visited.add(other)
+                results.append(
+                    dict(depth=level, rel_type=rel, rel_label=_GRAPH_REL_LABELS.get(rel, rel),
+                         direction=direction, dst_type=other[0], dst_id=other[1])
+                )
+                nxt.append(other)
+        frontier = nxt
+        if not frontier:
+            break
+    return results
+
+
+@mcp.tool()
+def graph_query(entity_type: str, entity_id: str, relation: str | None = None,
+                depth: int = 1, limit: int = 50) -> str:
+    """风控关系图查询（只读）：按主体查关系链，识别一机多号、同IP聚集、资金归集等关联风险（一层N层扩展）。
+    :param entity_type: 主体类型：account(账号)、device(设备)、ip(IP地址)、order(订单)
+    :param entity_id: 主体标识，如 A1001、D1001
+    :param relation: 关系类型过滤：same_device(同设备)、same_ip(同IP)、transfer(资金)，不填查全部
+    :param depth: 关系扩展层数，默认1层（直接关联），最大2层
+    :param limit: 返回关系条数上限，默认50
+    """
+    entity_type = (entity_type or "").strip().lower()
+    entity_id = (entity_id or "").strip()
+    if entity_type not in _GRAPH_NODES:
+        return "entity_type 不合法，可选值：" + "、".join(_GRAPH_NODES.keys())
+    if not entity_id:
+        return "请提供 entity_id（主体标识）"
+    depth = depth if depth and depth > 0 else 1
+    depth = min(depth, 2)
+    limit = limit if limit and limit > 0 else 50
+    relation = (relation or "").strip() or None
+
+    rels = _graph_bfs(entity_type, entity_id, relation, depth)[:limit]
+    if not rels:
+        return f"主体 {entity_type}:{entity_id} 在关系图中无{('「' + relation + '」') if relation else ''}关联记录。"
+
+    # 风险特征识别（一机多号 / 资金归集）
+    out = [f"【关系图查询】主体 {entity_type}:{entity_id}（扩展 {depth} 层）\n",
+           f"共 {len(rels)} 条关联关系：\n"]
+    for r in rels:
+        arrow = "->" if r["direction"] == "out" else "<-"
+        out.append(f"  L{r['depth']}  {entity_id} {arrow} [{r['rel_label']}] {r['dst_type']}:{r['dst_id']}")
+
+    # 一机多号检查：同设备挂载的账号数（含主体自身关联）
+    by_device: dict[str, list[str]] = {}
+    for row in _GRAPH_EDGES:
+        if row[2] == "same_device" and row[3] == "account":
+            by_device.setdefault(row[1], []).append(row[4])
+    multi = {d: a for d, a in by_device.items() if len(a) >= 3 and (entity_id in (d, *a) or depth >= 2)}
+    if multi:
+        out.append("\n⚠ 一机多号特征:")
+        for d, a in multi.items():
+            out.append(f"  设备 {d} 挂载 {len(a)} 个账号: {'、'.join(a)}")
+    by_target: dict[str, int] = {}
+    for row in _GRAPH_EDGES:
+        if row[2] == "transfer" and row[3] == "account":
+            by_target[row[4]] = by_target.get(row[4], 0) + 1
+    funnel = {t: n for t, n in by_target.items() if n >= 3 and any(entity_id in e for e in _GRAPH_EDGES if e[2] == "transfer" and e[4] == t)}
+    if funnel:
+        out.append("\n⚠ 资金归集特征:")
+        for t, n in funnel.items():
+            out.append(f"  收款卡 {t} 接收 {n} 个账号转账")
+    out.append("\n（数据源: 内存 mock 关系图；PG 边表 t_case_graph_edge 已就绪，真实化阶段切换数据源）")
+    return "\n".join(out).strip()
+
+
+# ---------------------------------------------------------------------------
 # 入口
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":

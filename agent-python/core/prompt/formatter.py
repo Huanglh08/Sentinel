@@ -151,11 +151,37 @@ class ContextFormatter:
         return self._render_kb_section("", doc_blocks)
 
     def _distinct_chunks(self, chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:
-        """1:1 翻译 ragent DefaultContextFormatter.distinctChunks：按 chunk key 去重，保留首次出现顺序。"""
+        """去重（chunk key）后按文档 round-robin 交错。
+
+        背景（P0-2）: rerank 后同一文档的多个 chunk 常连续聚集，
+        下游 `chunks[:top_k]` 截断时头部文档独占名额、其余文档被整体挤掉，
+        多意图/双场景问题只剩单一视角证据。
+        round-robin: 按 doc 分组后组间轮转（每文档先出第 1 块、再出第 2 块……），
+        保证截断后文档多样性最大化；组间顺序 = 各文档最高相关块的顺序；组内保持相关性顺序。
+        匿名块（无 doc_id）按 chunk key 独立成组，与渲染层分组行为一致。
+        """
         seen: dict[str, RetrievedChunk] = {}
         for c in chunks:
             seen.setdefault(_chunk_key(c), c)
-        return list(seen.values())
+        unique = list(seen.values())
+        if len(unique) <= 2:
+            return unique
+
+        groups: dict[str, list[RetrievedChunk]] = {}
+        for c in unique:
+            doc = (c.doc_id or "").strip() or _chunk_key(c)
+            groups.setdefault(doc, []).append(c)
+
+        out: list[RetrievedChunk] = []
+        queues = list(groups.values())
+        while queues:
+            survivors: list[list[RetrievedChunk]] = []
+            for q in queues:
+                out.append(q.pop(0))
+                if q:
+                    survivors.append(q)
+            queues = survivors
+        return out
 
     def _render_chunks_grouped_by_doc(
         self,

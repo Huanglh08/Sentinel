@@ -210,6 +210,8 @@ export function CaseInvestigationPage() {
             ]);
           } else if (ev.type === "approval.created") {
             setLogLines((prev) => [...prev, { text: `⚖ 生成 ${ev.approvals?.length || 0} 条人工审批待办`, kind: "ok" }]);
+          } else if (ev.type === "l1.autopass") {
+            setLogLines((prev) => [...prev, { text: `⚡ L1 放权自动放行 ${ev.actions?.length || 0} 条处置建议（已留痕）`, kind: "ok" }]);
           } else if (ev.type === "report") {
             const r = ev.report as { conclusion?: string; confidence?: number } | undefined;
             setLogLines((prev) => [

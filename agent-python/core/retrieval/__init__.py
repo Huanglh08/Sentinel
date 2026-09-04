@@ -18,7 +18,7 @@ from core.retrieval.retriever import (
 from core.retrieval.engine import (
     MultiChannelRetrievalEngine, RetrievalConfig, ChannelConfig,
 )
-from core.retrieval.rerank import Reranker, CrossEncoderReranker, LLMReranker, RoutingReranker
+from core.retrieval.rerank import Reranker, SiliconFlowReranker, CrossEncoderReranker, LLMReranker, RoutingReranker
 from core.retrieval.types import BY_SCORE_DESC  # noqa: F401  静态比较器导出
 
 __all__ = [

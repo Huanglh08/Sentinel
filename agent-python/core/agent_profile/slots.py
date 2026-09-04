@@ -29,6 +29,7 @@ class Group(str, enum.Enum):
     WORKFLOW = "WORKFLOW"
     AGENT = "AGENT"
     COMMON = "COMMON"
+    CASE = "CASE"
 
     @property
     def display_name(self) -> str:
@@ -36,6 +37,7 @@ class Group(str, enum.Enum):
             Group.WORKFLOW: "WorkFlow 专属",
             Group.AGENT: "Agent 专属",
             Group.COMMON: "通用",
+            Group.CASE: "案件调查",
         }[self]
 
 
@@ -108,5 +110,33 @@ AGENT_PROMPT_SLOTS: list[AgentPromptSlot] = [
         effective_modes={OrchestrationMode.WORKFLOW, OrchestrationMode.AGENT},
         inactive_reason=None,
         required_placeholders={"{chunks}", "{count}", "{question}", "{answer}"},
+    ),
+    # ------------------------------------------------------------------
+    # 案件调查三段式（Phase 2 GitOps）：调查链路不经过 WorkFlow/Agent 编排，
+    # 但槽位机制一致 —— 内容为空时代码常量兜底，配置后覆盖（__KEY__ 占位符）。
+    # ------------------------------------------------------------------
+    AgentPromptSlot(
+        name="CASE_TRIAGE", display_name="案件分诊", group=Group.CASE,
+        effective_modes={OrchestrationMode.WORKFLOW, OrchestrationMode.AGENT},
+        inactive_reason=None,
+        required_placeholders={"__SKILL_CATALOG__", "__CLUE__", "__RULE_HINTS__"},
+    ),
+    AgentPromptSlot(
+        name="CASE_INVESTIGATOR", display_name="案件调查员", group=Group.CASE,
+        effective_modes={OrchestrationMode.WORKFLOW, OrchestrationMode.AGENT},
+        inactive_reason=None,
+        required_placeholders={"__TOOL_CATALOG__"},
+    ),
+    AgentPromptSlot(
+        name="CASE_REPORTER", display_name="案件报告", group=Group.CASE,
+        effective_modes={OrchestrationMode.WORKFLOW, OrchestrationMode.AGENT},
+        inactive_reason=None,
+        required_placeholders={"__CLUE__", "__TRIAGE__", "__STEPS__"},
+    ),
+    AgentPromptSlot(
+        name="CASE_RULE_MINER", display_name="规则挖掘", group=Group.CASE,
+        effective_modes={OrchestrationMode.WORKFLOW, OrchestrationMode.AGENT},
+        inactive_reason=None,
+        required_placeholders={"__EXPERIENCE__"},
     ),
 ]

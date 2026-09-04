@@ -1,0 +1,6 @@
+{"name": "multi-risk-account", "clue": "账号 acc-9001 近 24h 在 3 个新设备登录，命中高风险设备指纹，且触发大额转账 5 笔，用户投诉非本人操作", "expect_conclusion": "suspicious", "min_confidence": 0.6, "category": "account"}
+{"name": "high-risk-ip", "clue": "IP 203.0.113.77 命中威胁情报恶意代理标签，过去 1 小时内对 40 个账号尝试登录，失败率 95%", "expect_conclusion": "malicious", "min_confidence": 0.6, "category": "ip"}
+{"name": "gambling-order", "clue": "订单 ord-778812 金额 6666.66，备注含'上分'，付款账户与收款商户均命中历史涉赌名单，交易时段集中在凌晨", "expect_conclusion": "malicious", "min_confidence": 0.6, "category": "order"}
+{"name": "normal-user", "clue": "用户 usr-2001 日常消费习惯稳定，本次登录与历史设备、常用地一致，交易金额与近 30 天均值持平，无投诉记录", "expect_conclusion": "benign", "min_confidence": 0.6, "category": "account"}
+{"name": "false-positive-order", "clue": "订单 ord-551230 金额 13140.00 被风控拦截，买家为 5 年老用户，收货地址与常用地址一致，商品为数码相机，商户资质齐全", "expect_conclusion": "benign", "min_confidence": 0.6, "category": "order"}
+{"name": "insufficient-info", "clue": "收到匿名举报称某商户'可能有问题'，无账号、无订单号、无 IP，仅一句模糊描述", "expect_conclusion": "inconclusive", "min_confidence": 0.0, "category": "triage"}

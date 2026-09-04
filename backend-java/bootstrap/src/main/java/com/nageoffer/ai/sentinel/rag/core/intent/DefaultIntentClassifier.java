@@ -149,8 +149,8 @@ public class DefaultIntentClassifier implements IntentClassifier, IntentNodeRegi
                         ChatMessage.system(systemPrompt),
                         ChatMessage.user(question)
                 ))
-                .temperature(0.1D)
-                .topP(0.3D)
+                .temperature(0D)
+                .topP(0.1D)
                 .thinking(false)
                 .build();
 

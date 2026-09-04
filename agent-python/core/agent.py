@@ -25,6 +25,7 @@ import asyncio
 import json
 import logging
 import threading
+import time
 from dataclasses import asdict
 from typing import AsyncIterator
 
@@ -43,6 +44,9 @@ from core.retrieval.engine import MultiChannelRetrievalEngine
 from core.retrieval.scope_resolver import RetrievalScope, RetrievalScopeResolver
 from core.retrieval.types import RetrievedChunk, RetrievalBudget
 from core.source import CitationContextEnricher, SourceRef, SourcesAssembler
+from core.guard import InputGuard, OutputGuard, TrajectoryAuditor, TRAJECTORY_CONSTRAINTS
+from core.guard.hardening import HARDENING_RULES
+from core.guard.rules import GUARD_ENABLED
 
 
 _logger = logging.getLogger(__name__)
@@ -88,6 +92,11 @@ class Agent:
         )
         # 1:1 翻译 ragent IntentGuidanceService（歧义引导）
         self.guidance_service = guidance_service or IntentGuidanceService()
+        # 红队防护第 1 层：输入确定性规则分类（LlamaFirewall PromptGuard 角色替代）
+        self.input_guard = InputGuard()
+        # 红队防护第 2 层：轨迹审计（rewrite 轨迹弱信号扫描 → 动态守则注入，
+        # LlamaFirewall AlignmentCheck 角色的成本最优替代）
+        self.trajectory_auditor = TrajectoryAuditor()
 
     async def answer(self, question: str, scope: dict | None = None) -> AsyncIterator[dict]:
         """流式回答：yield dict（type+delta）。检索后自动注入引用编号与来源面板数据。
@@ -98,22 +107,64 @@ class Agent:
           - 接受 scope["_cancelled"] = threading.Event
           - 编排主链路每步检查；流式生成阶段由 server.py 直接 raise asyncio.CancelledError 终止
         """
-        scope = scope or {}
+        if scope is None:
+            # 不能写 scope = scope or {}：空 dict 是 falsy，会新建对象，
+            # 调用方（server.py complete 帧）持有的引用从此拿不到 _ttft_breakdown/_sources
+            scope = {}
         knowledge_base_ids: list[str] = list(scope.get("knowledgeBaseIds") or [])
         history: list[dict] = list(scope.get("history") or [])
         cancelled: threading.Event | None = scope.get("_cancelled")
+        # TTFT 五段归因（Langfuse span 模型的轻量自建版，不引 SDK）：提前塞引用，
+        # 各段完成即填；中途短路（拒答/澄清/引导）路径带部分 breakdown 返回
+        _ttft: dict = {"rewrite_ms": None, "intent_ms": None, "retrieve_ms": None,
+                       "rerank_ms": None, "gate_ms": None, "llm_first_ms": None}
+        scope["_ttft_breakdown"] = _ttft
 
         def _check_cancel() -> None:
             if cancelled is not None and cancelled.is_set():
                 raise asyncio.CancelledError()
 
+        # 0) 红队输入防护（第 1 层）：高危模式命中即短路拒答，零检索零生成（<1ms）
+        #    拦截时 sources 为空 + 话术含拒答特征词 → redteam_eval 双重确定性判拦截
+        guard_verdict = self.input_guard.inspect(question)
+        if guard_verdict.blocked:
+            _logger.warning(
+                "[guard] input blocked rule=%s matched=%r q=%.120s",
+                guard_verdict.rule_id, guard_verdict.matched, question,
+            )
+            scope["_sources"] = []
+            scope["_guard"] = {
+                "layer": "input", "rule": guard_verdict.rule_id,
+                "matched": guard_verdict.matched,
+            }
+            yield {"type": "response", "delta": guard_verdict.refusal_text}
+            return
+
         # 1) 改写 + 拆子问题（1:1 翻译 ragent QueryRewriteService）
+        # v2(2026-09-01 multiturn 治理): 注入历史做指代消解改写；缺要素问题短路澄清
+        #    （澄清判定搭改写顺风车，零额外 LLM 调用）
         _check_cancel()
-        sub_queries = await self.rewriter.rewrite(question)
+        _t0_rewrite = time.perf_counter()
+        rewrite_result = await self.rewriter.rewrite(question, history)
+        _ttft["rewrite_ms"] = round((time.perf_counter() - _t0_rewrite) * 1000, 1)
+        if rewrite_result.clarify and rewrite_result.clarify_question:
+            _logger.info(
+                "[clarify] 要素缺失追问: %.80s | q=%.120s", rewrite_result.clarify_question, question
+            )
+            scope["_sources"] = []
+            yield {"type": "response", "delta": rewrite_result.clarify_question}
+            return
+        sub_queries = rewrite_result.queries or [question]
+        # 原句保留为第一路查询：LLM 改写有方差（可能丢实体/换句式导致向量漂移），
+        # 原句与改写句双路检索后融合互补（root cause: 单路改写在 LLM04 类场景反噬召回）
+        if question not in sub_queries:
+            sub_queries = [question, *sub_queries]
 
         # 2) 意图解析：并发 + cap_total_intents（1:1 翻译 ragent IntentResolver.resolve）
         _check_cancel()
+        _t0_intent = time.perf_counter()
         sub_intents: list[SubQuestionIntent] = await self.resolver.resolve(sub_queries)
+        _ttft["intent_ms"] = round((time.perf_counter() - _t0_intent) * 1000, 1)
         mcp_intents, kb_intents = self.resolver.merge_intent_group(sub_intents)
 
         # 2.1) 歧义引导（1:1 翻译 ragent IntentGuidanceService.detectAmbiguity）
@@ -175,6 +226,8 @@ class Agent:
         # 5) KB 检索：按子查询的 scope 分批（修跨库混淆）
         kb_hits: list[RetrievedChunk] = []
         if self.retriever:
+            _engine_timing: dict = {}
+            _t0_retrieve = time.perf_counter()
             for sq, scope_resolved in per_sq_scopes:
                 _check_cancel()
                 # 1:1 ragent StreamChatPipeline#retrieve: retrieval errors bubble up
@@ -189,8 +242,13 @@ class Agent:
                         candidate_limit=self.search_channel_config.fusion.rerank_candidate_limit,
                         context_top_k=context_top_k,
                     ),
+                    timing=_engine_timing,
                 )
                 kb_hits.extend(hits)
+            # 五段归因：检索段=通道执行+RRF 融合（含子查询串行累积）；精排/门控单列
+            _ttft["retrieve_ms"] = round((time.perf_counter() - _t0_retrieve) * 1000, 1)
+            _ttft["rerank_ms"] = _engine_timing.get("Rerank")
+            _ttft["gate_ms"] = _engine_timing.get("RelevanceGate")
 
         # 6) 来源装配（1:1 翻译 ragent SourcesAssembler.assemble）
         source_refs: list[SourceRef] = self.sources_assembler.assemble(kb_hits, self.doc_meta_provider)
@@ -236,6 +294,25 @@ class Agent:
         # 7c) buildSystemPrompt + buildStructuredMessages
         structured = self.prompt_service.build_structured_messages(plan, prompt_ctx)
 
+        # 7d) 红队防护第 2 层：轨迹审计 —— 对「原问题 + rewrite 子问题」做弱信号扫描，
+        #     命中 ≥2 类即虚构引用诱导强信号 → 动态注入针对性防编造守则（生成前收紧行为）。
+        #     与第 1 层分工：不短路拒答，误伤代价仅为一段额外 system 文本。
+        if GUARD_ENABLED:
+            traj_audit = self.trajectory_auditor.audit(question, sub_queries, history)
+            if traj_audit.injected:
+                _logger.warning(
+                    "[guard] trajectory suspicious signals=%s q=%.120s",
+                    traj_audit.signals, question,
+                )
+                scope["_guard"] = {
+                    "layer": "trajectory",
+                    "signals": traj_audit.signals,
+                }
+                _traj_constraints = traj_audit.constraints or TRAJECTORY_CONSTRAINTS
+                for _m in structured.get("system", []):
+                    if _m.get("role") == "system":
+                        _m["content"] = str(_m.get("content") or "") + _traj_constraints
+
         # 8) 注入会话历史
         messages: list[dict] = list(structured["system"])
         for h in history:
@@ -245,8 +322,27 @@ class Agent:
                 messages.append({"role": role, "content": content})
         messages.extend(structured["user"])
 
+        # 8) 流式生成 + 红队输出防护（第 3 层）：命中可执行载荷即断流补拒答（CodeShield 角色替代）
+        out_guard = OutputGuard()
+        _t0_llm = time.perf_counter()
         try:
             async for token in self.llm.stream(messages):
+                if _ttft["llm_first_ms"] is None:
+                    _ttft["llm_first_ms"] = round((time.perf_counter() - _t0_llm) * 1000, 1)
+                if isinstance(token, dict) and token.get("type") == "response":
+                    verdict = out_guard.feed(str(token.get("delta") or ""))
+                    if verdict.blocked or verdict.truncated_len:
+                        if verdict.blocked:
+                            _logger.warning(
+                                "[guard] output blocked rule=%s matched=%r",
+                                verdict.rule_id, verdict.matched,
+                            )
+                            scope["_guard"] = {
+                                "layer": "output", "rule": verdict.rule_id,
+                                "matched": verdict.matched,
+                            }
+                        yield {"type": "response", "delta": out_guard.suffix}
+                        return
                 yield token
         except Exception as e:  # noqa: BLE001
             yield {"type": "response", "delta": f"\n[生成失败: {e}]"}
@@ -288,6 +384,9 @@ class Agent:
         纯系统响应：直接使用系统Prompt + 会话历史 + 用户问题，不进行检索。
         """
         system_prompt = custom_prompt or self._get_default_system_prompt()
+        # 红队防护第 2 层：SYSTEM 直答通道同样追加安全守则
+        if GUARD_ENABLED:
+            system_prompt = system_prompt + HARDENING_RULES
         messages: list[dict] = [{"role": "system", "content": system_prompt}]
         # 注入会话历史
         for h in history:
@@ -297,8 +396,20 @@ class Agent:
                 messages.append({"role": role, "content": content})
         messages.append({"role": "user", "content": question})
 
+        # SYSTEM 直答同样走输出防护（第 3 层）
+        out_guard = OutputGuard()
         try:
             async for token in self.llm.stream(messages):
+                if isinstance(token, dict) and token.get("type") == "response":
+                    verdict = out_guard.feed(str(token.get("delta") or ""))
+                    if verdict.blocked or verdict.truncated_len:
+                        if verdict.blocked:
+                            _logger.warning(
+                                "[guard] output(system) blocked rule=%s matched=%r",
+                                verdict.rule_id, verdict.matched,
+                            )
+                        yield {"type": "response", "delta": out_guard.suffix}
+                        return
                 yield token
         except Exception as e:  # noqa: BLE001
             yield {"type": "response", "delta": f"\n[生成失败: {e}]"}

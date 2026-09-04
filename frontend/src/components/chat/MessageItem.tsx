@@ -98,7 +98,7 @@ export const MessageItem = React.memo(function MessageItem({ message }: MessageI
     return (
       <div className="group flex flex-col items-end">
         {isEditing ? (
-          <div className="w-full max-w-[80%] rounded-2xl border border-[#E5E5E5] bg-white p-3 shadow-[0_4px_12px_rgba(0,0,0,0.06)]">
+          <div className="w-full max-w-[80%] rounded-2xl border border-cyan-400/30 bg-slate-900/90 p-3 shadow-[0_8px_24px_rgba(0,0,0,0.25)]">
             <textarea
               ref={editRef}
               value={draft}
@@ -122,13 +122,13 @@ export const MessageItem = React.memo(function MessageItem({ message }: MessageI
               }}
               rows={1}
               aria-label="编辑消息"
-              className="w-full resize-none border-0 bg-transparent text-[15px] leading-relaxed text-[#333333] outline-none"
+              className="w-full resize-none border-0 bg-transparent text-[15px] leading-relaxed text-slate-100 outline-none"
             />
             <div className="mt-2 flex items-center justify-end gap-2">
               <button
                 type="button"
                 onClick={cancelEdit}
-                className="rounded-lg px-3 py-1.5 text-xs font-medium text-[#666666] transition-colors hover:bg-[#F5F5F5]"
+                className="rounded-lg px-3 py-1.5 text-xs font-medium text-slate-400 transition-colors hover:bg-white/10"
               >
                 取消
               </button>
@@ -139,8 +139,8 @@ export const MessageItem = React.memo(function MessageItem({ message }: MessageI
                 className={cn(
                   "inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-white transition-colors",
                   !draft.trim() || isStreaming
-                    ? "cursor-not-allowed bg-[#C7D7F5]"
-                    : "bg-[#3B82F6] hover:bg-[#2563EB]"
+                    ? "cursor-not-allowed bg-white/10 text-slate-500"
+                    : "bg-gradient-to-r from-cyan-400 via-blue-500 to-violet-600 hover:brightness-110"
                 )}
               >
                 <Check className="h-3.5 w-3.5" />
@@ -159,7 +159,7 @@ export const MessageItem = React.memo(function MessageItem({ message }: MessageI
                 onClick={handleCopy}
                 aria-label="复制"
                 title="复制"
-                className="flex h-7 w-7 items-center justify-center rounded-md text-[#999999] transition-colors hover:bg-[#F5F5F5] hover:text-[#666666]"
+                className="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-white/10 hover:text-slate-200"
               >
                 <Copy className="h-4 w-4" />
               </button>
@@ -172,8 +172,8 @@ export const MessageItem = React.memo(function MessageItem({ message }: MessageI
                 className={cn(
                   "flex h-7 w-7 items-center justify-center rounded-md transition-colors",
                   isStreaming
-                    ? "cursor-not-allowed text-[#DDDDDD]"
-                    : "text-[#999999] hover:bg-[#F5F5F5] hover:text-[#666666]"
+                    ? "cursor-not-allowed text-slate-700"
+                    : "text-slate-500 hover:bg-white/10 hover:text-slate-200"
                 )}
               >
                 <Pencil className="h-4 w-4" />
@@ -193,9 +193,9 @@ export const MessageItem = React.memo(function MessageItem({ message }: MessageI
       </div>
       <div className="min-w-0 flex-1 space-y-4">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-[#1F2937]">{ASSISTANT_NAME}</span>
+          <span className="text-sm font-semibold text-slate-100">{ASSISTANT_NAME}</span>
           {message.isDeepThinking ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-[#EFF6FF] px-2 py-0.5 text-[11px] font-medium text-[#2563EB]">
+            <span className="inline-flex items-center gap-1 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2 py-0.5 text-[11px] font-medium text-cyan-300">
               <Brain className="h-3 w-3" />
               深度思考
             </span>

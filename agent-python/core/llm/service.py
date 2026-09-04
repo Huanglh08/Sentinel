@@ -204,7 +204,7 @@ class AsyncRoutingLLMService(LLMService):
                 try:
                     async for token in client.stream(
                         messages,
-                        temperature=kwargs.get("temperature", 0.3),
+                        temperature=kwargs.get("temperature", 0.1),
                         top_p=kwargs.get("top_p", 0.9),
                         max_tokens=kwargs.get("max_tokens", 2048),
                     ):

@@ -1,0 +1,551 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sentinel 图标设计 · 卡通可爱但不娘</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&display=swap" rel="stylesheet" />
+<style>
+:root{
+  --c1:#4F46E5; --c2:#7C3AED; --c3:#A855F7; --c4:#3B82F6;
+  --page:#070912; --card:rgba(255,255,255,.045); --bd:rgba(255,255,255,.09);
+  --txt:#e9ecf5; --dim:#98a0b8;
+  --amp:1; --gap:.07s;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--page);color:var(--txt);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  -webkit-font-smoothing:antialiased;min-height:100vh;overflow-x:hidden;
+}
+body::before{
+  content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:
+    radial-gradient(900px 520px at 10% -10%,rgba(124,58,237,.30),transparent 60%),
+    radial-gradient(800px 460px at 90% 2%,rgba(59,130,246,.22),transparent 62%),
+    radial-gradient(700px 500px at 50% 112%,rgba(168,85,247,.16),transparent 60%);
+}
+.wrap{max-width:1200px;margin:0 auto;padding:34px 22px 90px}
+.topbar{display:flex;flex-wrap:wrap;align-items:flex-end;gap:16px;justify-content:space-between;margin-bottom:20px}
+.title{font-size:25px;font-weight:700;letter-spacing:-.02em;margin:0 0 6px}
+.subtitle{margin:0;color:var(--dim);font-size:13px;line-height:1.7}
+.controls{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.chip{
+  display:inline-flex;align-items:center;gap:7px;background:var(--card);border:1px solid var(--bd);
+  padding:7px 13px;border-radius:999px;font-size:12.5px;color:var(--txt);cursor:pointer;user-select:none;transition:.2s;
+}
+.chip:hover{background:rgba(255,255,255,.09)}
+.chip input{accent-color:#a855f7;margin:0}
+button.act{
+  border:1px solid var(--bd);background:var(--card);color:var(--txt);padding:8px 15px;
+  border-radius:999px;font-size:12.5px;cursor:pointer;font-family:inherit;transition:.2s;
+}
+button.act:hover{background:rgba(255,255,255,.13)}
+
+h2.sec{font-size:17px;font-weight:650;margin:38px 0 5px;letter-spacing:-.01em}
+p.secsub{color:var(--dim);font-size:12.8px;margin:0 0 15px;line-height:1.75}
+
+/* ---------- 图标网格 ---------- */
+.grid{display:grid;gap:14px}
+.g-icons{grid-template-columns:repeat(auto-fill,minmax(250px,1fr))}
+.card{
+  background:var(--card);border:1px solid var(--bd);border-radius:16px;padding:15px;
+  transition:.22s;position:relative;
+}
+.card:hover{border-color:rgba(168,85,247,.45);background:rgba(255,255,255,.07)}
+.card.picked{border-color:rgba(168,85,247,.7);box-shadow:0 0 0 1px rgba(168,85,247,.35),0 16px 44px -24px rgba(124,58,237,.8)}
+.card .iname{font-size:13px;font-weight:650;margin:0 0 3px;display:flex;justify-content:space-between;align-items:center;gap:6px}
+.card .iname em{font-style:normal;font-size:10.5px;color:#a855f7;font-weight:500}
+.card .idesc{font-size:11.2px;color:var(--dim);margin:0 0 11px;line-height:1.65;min-height:36px}
+.stage{
+  border-radius:12px;min-height:132px;display:flex;align-items:center;justify-content:center;
+  padding:24px;background:#fbfcff;transition:.3s;
+}
+body[data-bg="dark"] .stage{background:#0e1224}
+body[data-bg="tile"] .stage{background:linear-gradient(135deg,#4F46E5,#7C3AED)}
+body[data-bg="tile"] .stage svg{filter:drop-shadow(0 4px 12px rgba(0,0,0,.28))}
+.stage svg{display:block;width:74px;height:74px}
+.card .pick{
+  margin-top:11px;width:100%;border:1px solid var(--bd);background:rgba(255,255,255,.05);color:var(--txt);
+  padding:7px;border-radius:8px;font-size:11.5px;cursor:pointer;font-family:inherit;transition:.2s;
+}
+.card .pick:hover{background:rgba(255,255,255,.13)}
+.card.picked .pick{background:linear-gradient(135deg,#7c3aed,#4f46e5);border-color:transparent;color:#fff}
+
+/* ---------- 尺寸实测 ---------- */
+.sizes{
+  display:flex;align-items:flex-end;gap:30px;flex-wrap:wrap;
+  padding:26px 22px;background:rgba(255,255,255,.03);border:1px solid var(--bd);border-radius:16px;
+}
+.sizes .col{display:flex;flex-direction:column;align-items:center;gap:9px}
+.sizes .col .box{
+  width:calc(var(--s) + 26px);height:calc(var(--s) + 26px);border-radius:12px;
+  display:flex;align-items:center;justify-content:center;background:#fbfcff;
+}
+body[data-bg="dark"] .sizes .col .box{background:#0e1224}
+body[data-bg="tile"] .sizes .col .box{background:linear-gradient(135deg,#4F46E5,#7C3AED)}
+.sizes .col svg{width:var(--s);height:var(--s);display:block}
+.sizes .col span{font-size:11px;color:var(--dim)}
+
+/* ---------- 组合场景 ---------- */
+.scenes{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:14px}
+.scene{border:1px solid var(--bd);border-radius:14px;overflow:hidden;background:rgba(255,255,255,.03)}
+.scene .cap{padding:9px 13px;font-size:11.5px;color:var(--dim);border-bottom:1px solid var(--bd)}
+.scene .body{padding:20px 16px;display:flex;align-items:center}
+.mock-sidebar{background:#fff;gap:12px}
+.mock-sidebar .meta p:first-child{font-size:14.5px;font-weight:600;color:#1A1A1A;margin:0}
+.mock-sidebar .meta p:last-child{font-size:11px;color:#999;margin:2px 0 0}
+.mock-admin{background:linear-gradient(180deg,#1a1f2e,#252d3d);gap:12px}
+.mock-admin .meta p:first-child{font-size:13.5px;font-weight:600;color:#fff;margin:0}
+.mock-admin .meta p:last-child{font-size:11px;color:rgba(255,255,255,.6);margin:2px 0 0}
+.mock-hero{background:#fff;min-height:210px;flex-direction:column;align-items:flex-start;justify-content:center;gap:4px;padding-top:26px;padding-bottom:26px}
+.mock-hero .lead{font-size:12.5px;color:#6b7280;margin:0}
+.mock-hero .sub{font-size:12px;color:#9ca3af;margin:8px 0 0}
+.brand{display:flex;align-items:center;gap:12px}
+.brand svg{width:38px;height:38px;flex:none}
+.hero-brand{display:flex;align-items:center;gap:14px}
+.hero-brand svg{width:56px;height:56px;flex:none}
+
+/* ---------- 字标（已定稿：Fredoka × Squash） ---------- */
+.wm{display:inline-block;font-family:"Fredoka","Segoe UI",sans-serif;font-size:var(--ws,44px);
+  font-weight:700;line-height:1.2;letter-spacing:.01em;white-space:nowrap;padding-bottom:.12em}
+.wm .ch{position:relative;display:inline-block;transform-origin:50% 88%;will-change:transform}
+.wm .ch-txt{
+  display:inline-block;
+  background-image:linear-gradient(115deg,var(--c1),var(--c2) 38%,var(--c3) 62%,var(--c4));
+  background-size:210% 100%;
+  -webkit-background-clip:text;background-clip:text;
+  -webkit-text-fill-color:transparent;color:transparent;
+  animation:flow 7s linear infinite;
+}
+@keyframes flow{from{background-position:0 50%}to{background-position:210% 50%}}
+.wm .ch-sh{
+  position:absolute;left:50%;bottom:-.06em;width:.78em;height:.13em;border-radius:50%;
+  background:radial-gradient(ellipse at center,rgba(79,70,229,.45),rgba(79,70,229,0) 72%);
+  transform:translateX(-50%);pointer-events:none;
+}
+.b-squash .ch{animation:b-sq 2.4s infinite;animation-delay:calc(var(--i) * var(--gap))}
+.b-squash .ch-sh{animation:s-sq 2.4s infinite;animation-delay:calc(var(--i) * var(--gap))}
+@keyframes b-sq{
+  0%,52%,100%{transform:translateY(0) scale(1,1);animation-timing-function:ease-in-out}
+  56%{transform:translateY(calc(.05em * var(--amp))) scale(calc(1 + .14 * var(--amp)),calc(1 - .14 * var(--amp)));animation-timing-function:cubic-bezier(.2,.7,.4,1)}
+  63%{transform:translateY(calc(-.44em * var(--amp))) scale(calc(1 - .08 * var(--amp)),calc(1 + .12 * var(--amp)));animation-timing-function:cubic-bezier(.4,0,.6,1)}
+  71%{transform:translateY(calc(-.54em * var(--amp))) scale(1,1);animation-timing-function:cubic-bezier(.5,0,.7,.6)}
+  79%{transform:translateY(calc(-.07em * var(--amp))) scale(calc(1 - .05 * var(--amp)),calc(1 + .08 * var(--amp)));animation-timing-function:cubic-bezier(.3,0,.7,1)}
+  85%{transform:translateY(0) scale(calc(1 + .28 * var(--amp)),calc(1 - .26 * var(--amp)));animation-timing-function:cubic-bezier(.2,.9,.4,1)}
+  90%{transform:translateY(calc(-.12em * var(--amp))) scale(calc(1 - .03 * var(--amp)),calc(1 + .05 * var(--amp)));animation-timing-function:cubic-bezier(.4,0,.6,1)}
+  94%{transform:translateY(0) scale(calc(1 + .11 * var(--amp)),calc(1 - .09 * var(--amp)));animation-timing-function:ease-out}
+  97%{transform:translateY(0) scale(calc(1 + .03 * var(--amp)),calc(1 - .03 * var(--amp)))}
+}
+@keyframes s-sq{
+  0%,52%,100%{transform:translateX(-50%) scale(1);opacity:.45}
+  71%{transform:translateX(-50%) scale(calc(1 - .42 * var(--amp)));opacity:.14}
+  85%{transform:translateX(-50%) scale(calc(1 + .30 * var(--amp)));opacity:.55}
+  94%{transform:translateX(-50%) scale(calc(1 + .06 * var(--amp)));opacity:.48}
+}
+
+/* ---------- 图标动画 ---------- */
+.ic{transform-box:view-box}
+.ic-float{transform-box:view-box;transform-origin:center 60%;animation:floaty 4.2s ease-in-out infinite}
+@keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-2px)}}
+.ic-blink{transform-box:fill-box;transform-origin:center;animation:blink 5.2s infinite}
+@keyframes blink{0%,91%,100%{transform:scaleY(1)}94%{transform:scaleY(.08)}97%{transform:scaleY(1)}}
+.ic-radar{transform-box:view-box;transform-origin:32px 12px;animation:spin 4s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.ic-pulse{transform-box:view-box;transform-origin:32px 7px;animation:pulsew 2.6s ease-out infinite}
+@keyframes pulsew{0%{opacity:0;transform:scale(.55)}25%{opacity:1}100%{opacity:0;transform:scale(1.45)}}
+.ic-scan{animation:scanline 3.2s ease-in-out infinite}
+@keyframes scanline{0%,100%{transform:translateY(0);opacity:0}12%{opacity:.85}50%{transform:translateY(19px);opacity:.85}88%{opacity:0}}
+.ic-wing{transform-box:fill-box;transform-origin:center;animation:wing 2.4s ease-in-out infinite}
+@keyframes wing{0%,100%{transform:rotate(0)}50%{transform:rotate(-7deg)}}
+
+body.no-float .ic-float,body.no-blink .ic-blink,body.no-radar .ic-radar,
+body.no-pulse .ic-pulse,body.no-scan .ic-scan,body.no-wing .ic-wing{animation:none}
+body.no-anim .wm .ch,body.no-anim .wm .ch-sh,body.no-anim .wm .ch-txt{animation:none}
+
+/* ---------- 设计法则 ---------- */
+.rules{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}
+.rule{border:1px solid var(--bd);border-radius:14px;padding:16px 18px;background:rgba(255,255,255,.03)}
+.rule h3{margin:0 0 10px;font-size:13.5px;font-weight:650}
+.rule ul{margin:0;padding-left:17px;font-size:12.2px;line-height:1.95;color:var(--dim)}
+.rule.ok{border-color:rgba(16,185,129,.35)}
+.rule.ok h3{color:#6ee7b7}
+.rule.no{border-color:rgba(239,68,68,.32)}
+.rule.no h3{color:#fca5a5}
+.bar{
+  margin:0 0 16px;padding:10px 15px;border-radius:12px;font-size:12.5px;
+  background:linear-gradient(135deg,rgba(124,58,237,.26),rgba(59,130,246,.18));
+  border:1px solid rgba(168,85,247,.35);line-height:1.7;
+}
+.note{
+  margin-top:30px;padding:15px 18px;border:1px dashed rgba(255,255,255,.16);
+  border-radius:14px;color:var(--dim);font-size:12.5px;line-height:1.95;
+}
+.note b{color:#c4b5fd;font-weight:600}
+code{background:rgba(255,255,255,.08);padding:1px 6px;border-radius:5px;font-size:11.5px}
+@media (prefers-reduced-motion: reduce){
+  .wm .ch,.wm .ch-sh,.wm .ch-txt,.ic-float,.ic-blink,.ic-radar,.ic-pulse,.ic-scan,.ic-wing{animation:none !important}
+}
+</style>
+</head>
+<body data-bg="light">
+<div class="wrap">
+
+  <div class="topbar">
+    <div>
+      <h1 class="title">Sentinel 图标 · 卡通可爱但不娘</h1>
+      <p class="subtitle">6 个方案，全部为 64×64 矢量、无位图、可等比缩放至 16px。<br/>下方所有开关都是纯 CSS，落地时可直接迁进 <code>globals.css</code>。</p>
+    </div>
+    <div class="controls">
+      <label class="chip"><input type="checkbox" id="cFloat" checked>悬浮</label>
+      <label class="chip"><input type="checkbox" id="cBlink" checked>眨眼</label>
+      <label class="chip"><input type="checkbox" id="cRadar" checked>雷达旋转</label>
+      <label class="chip"><input type="checkbox" id="cPulse" checked>信号波</label>
+      <label class="chip"><input type="checkbox" id="cScan" checked>扫描线</label>
+      <button class="act" id="bgBtn">底色：浅</button>
+      <button class="act" id="animBtn">全部暂停</button>
+    </div>
+  </div>
+
+  <div class="bar" id="bar">已定稿部件：<b>字标 = Fredoka × Squash 完整弹跳</b>（首屏 Hero 已采纳）　|　待定：<b>图标</b>（当前预览：Shield Buddy 盾牌小卫）</div>
+
+  <h2 class="sec">① 图标方案 <span style="font-size:12px;color:var(--dim);font-weight:400">— 点卡片下方按钮切换全页图标</span></h2>
+  <p class="secsub">共同点：大几何眼 + 圆角厚造型 + 蓝紫科技配色；差异在"可爱"与"硬朗"的配比。</p>
+  <div class="grid g-icons" id="iconGrid"></div>
+
+  <h2 class="sec">② 小尺寸实测 <span style="font-size:12px;color:var(--dim);font-weight:400">— 图标最终要出现在 16px 标签页、20px 列表、38px 侧边栏</span></h2>
+  <p class="secsub">16px 下还能认出"有个小家伙在看着你"，才算合格。切到「色块底」可测反白场景。</p>
+  <div class="sizes" id="sizeRow"></div>
+
+  <h2 class="sec">③ 与字标组合</h2>
+  <p class="secsub">图标 + 已定稿字标（Fredoka × Squash）在三处落地位置的真实样子。</p>
+  <div class="scenes">
+    <div class="scene">
+      <div class="cap">C 端侧边栏（Sidebar.tsx · 38px）</div>
+      <div class="body mock-sidebar">
+        <div class="brand" data-slot="icon"></div>
+        <div class="meta"><p>sentinel AI</p><p>Powered by AI</p></div>
+      </div>
+    </div>
+    <div class="scene">
+      <div class="cap">管理后台侧边栏（AdminLayout.tsx · 深底）</div>
+      <div class="body mock-admin">
+        <div class="brand" data-slot="icon"></div>
+        <div class="meta"><p>Sentinel AI</p><p>Knowledge Console</p></div>
+      </div>
+    </div>
+    <div class="scene">
+      <div class="cap">首屏 Hero（WelcomeScreen.tsx · 已采纳）</div>
+      <div class="body mock-hero">
+        <p class="lead">你好，我是</p>
+        <div class="hero-brand" data-slot="iconBig"></div>
+        <p class="sub">把问题变成清晰答案</p>
+      </div>
+    </div>
+  </div>
+
+  <h2 class="sec">④ 设计法则：如何做到「可爱但不娘」</h2>
+  <p class="secsub">这是本轮全部 6 个方案共同遵守的约束，落地时也按此校准。</p>
+  <div class="rules">
+    <div class="rule ok">
+      <h3>✓ 用它制造「可爱」</h3>
+      <ul>
+        <li><b>大头比例</b>：头部/主体占 60%+，立刻产生幼态感</li>
+        <li><b>圆角厚造型</b>：rx 拉满，边角无锐利切线</li>
+        <li><b>大几何眼</b>：圆或胶囊形，占面部 1/3</li>
+        <li><b>轻微悬浮</b>：2px 上下浮动，赋予生命感</li>
+        <li><b>眨眼</b>：5 秒一次，最廉价也最有效的拟人</li>
+      </ul>
+    </div>
+    <div class="rule ok">
+      <h3>✓ 用它守住「不娘」</h3>
+      <ul>
+        <li><b>冷色科技配色</b>：只用 #4F46E5 / #7C3AED / #3B82F6 / #A855F7</li>
+        <li><b>机甲属性件</b>：天线、护目镜、雷达、装甲板、信号波</li>
+        <li><b>中性表情</b>：警觉/专注，不做眯眼笑</li>
+        <li><b>方正轮廓</b>：底座与护甲用直线和菱形，压住圆润感</li>
+        <li><b>无嘴或一字嘴</b>：用横杠/装甲替代弧线嘴</li>
+      </ul>
+    </div>
+    <div class="rule no">
+      <h3>✗ 明确规避</h3>
+      <ul>
+        <li>睫毛、蝴蝶结、星星贴纸等装饰</li>
+        <li>腮红、嘴唇、酒窝</li>
+        <li>粉色 / 暖橘 / 马卡龙色系</li>
+        <li>眯眼笑 ^ ^ 、吐舌等卖萌表情</li>
+        <li>柔软手写体、圆点高光堆砌</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="note">
+    <b>当前状态：</b>本页与 <code>wordmark-preview-v2.html</code> 均为 <code>public/</code> 下的独立预览页，<b>未改动 <code>frontend/src</code> 任何文件</b>。<br/>
+    <b>落地时：</b>图标抽成 <code>SentinelMark.tsx</code>（<code>size</code> / <code>animated</code> props，内联 SVG 以便 CSS 控制动画），同步替换 <code>public/favicon.svg</code>；
+    字标抽成 <code>SentinelWordmark.tsx</code>。动画统一降级：<code>prefers-reduced-motion</code> 与侧边栏小尺寸下关闭弹跳，只留静态渐变。<br/>
+    <b>待你确认后</b>再一次性套用到 <code>Sidebar.tsx</code> / <code>AdminLayout.tsx</code> / <code>WelcomeScreen.tsx</code>。
+  </div>
+</div>
+
+<script>
+(function(){
+/* ================= 图标定义（64×64，配色统一品牌色） ================= */
+var G = function(u){
+  return '<linearGradient id="g'+u+'" x1="0" y1="0" x2="1" y2="1">'+
+         '<stop offset="0" stop-color="#7C3AED"/><stop offset="1" stop-color="#3B82F6"/></linearGradient>';
+};
+var EYE = '#1E1B4B';
+
+var ICONS = [
+{
+  id:'shield', name:'Shield Buddy', tag:'盾牌小卫', fit:'品牌延续性最强',
+  desc:'沿用现有盾形资产，加一对大几何眼 + 顶部信号天线。改动最小，老用户无认知断层。',
+  svg:function(u){
+    return '<svg class="ic" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">'+
+      '<defs>'+G(u)+'</defs>'+
+      '<g class="ic-float">'+
+        '<g class="ic-pulse">'+
+          '<path d="M23 4 A12 12 0 0 1 41 4" fill="none" stroke="#A855F7" stroke-width="2.4" stroke-linecap="round"/>'+
+          '<path d="M27 8.5 A7 7 0 0 1 37 8.5" fill="none" stroke="#A855F7" stroke-width="2.4" stroke-linecap="round"/>'+
+        '</g>'+
+        '<path d="M32 8 L32 13" stroke="#6D28D9" stroke-width="2.8" stroke-linecap="round"/>'+
+        '<circle cx="32" cy="6.5" r="3.2" fill="#A855F7"/>'+
+        '<path d="M32 11 L54 18 V33 C54 45.6 44.6 55.4 32 59.5 C19.4 55.4 10 45.6 10 33 V18 Z" fill="url(#g'+u+')"/>'+
+        '<path d="M32 11 L54 18 V23 C41 22.6 25 20.4 32 11 Z" fill="#fff" opacity=".13"/>'+
+        '<path d="M17.5 25 L28 22.6 M36 22.6 L46.5 25" stroke="'+EYE+'" stroke-width="2.6" stroke-linecap="round" opacity=".5"/>'+
+        '<g class="ic-blink">'+
+          '<rect x="18.5" y="27.5" width="10.5" height="13.5" rx="5.2" fill="#fff"/>'+
+          '<rect x="35" y="27.5" width="10.5" height="13.5" rx="5.2" fill="#fff"/>'+
+          '<circle cx="23.8" cy="34.3" r="3" fill="'+EYE+'"/>'+
+          '<circle cx="40.2" cy="34.3" r="3" fill="'+EYE+'"/>'+
+          '<circle cx="25" cy="33" r="1.15" fill="#fff"/>'+
+          '<circle cx="41.4" cy="33" r="1.15" fill="#fff"/>'+
+        '</g>'+
+        '<path d="M27.5 45.5 L36.5 45.5" stroke="#fff" stroke-width="2.6" stroke-linecap="round" opacity=".8"/>'+
+      '</g></svg>';
+  }
+},
+{
+  id:'radar', name:'Radar Bot', tag:'雷达小哨兵', fit:'最不娘 · 机甲感',
+  desc:'护目镜面罩 + 头顶旋转雷达 + 面罩内扫描线。全书最硬朗，几乎零萌系元素。',
+  svg:function(u){
+    return '<svg class="ic" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">'+
+      '<defs>'+G(u)+'<clipPath id="c'+u+'"><rect x="14" y="24" width="36" height="22" rx="11"/></clipPath></defs>'+
+      '<g class="ic-float">'+
+        '<g class="ic-radar">'+
+          '<path d="M32 12 L32 5" stroke="#A855F7" stroke-width="2.6" stroke-linecap="round"/>'+
+          '<path d="M24 7 A9 9 0 0 1 40 7" fill="#A855F7" opacity=".95"/>'+
+          '<path d="M32 7 L40 7" stroke="#fff" stroke-width="1.6" stroke-linecap="round" opacity=".65"/>'+
+        '</g>'+
+        '<rect x="4" y="29" width="6" height="14" rx="3" fill="#4F46E5"/>'+
+        '<rect x="54" y="29" width="6" height="14" rx="3" fill="#4F46E5"/>'+
+        '<rect x="9" y="14" width="46" height="42" rx="14" fill="url(#g'+u+')"/>'+
+        '<path d="M9 28 A14 14 0 0 1 23 14 L41 14 A14 14 0 0 1 55 28 Z" fill="#fff" opacity=".1"/>'+
+        '<rect x="14" y="24" width="36" height="22" rx="11" fill="'+EYE+'" opacity=".9"/>'+
+        '<g clip-path="url(#c'+u+')">'+
+          '<rect class="ic-scan" x="14" y="24" width="36" height="3" fill="#60A5FA" opacity=".7"/>'+
+        '</g>'+
+        '<g class="ic-blink">'+
+          '<rect x="19.5" y="31" width="10" height="7" rx="3.5" fill="#60A5FA"/>'+
+          '<rect x="34.5" y="31" width="10" height="7" rx="3.5" fill="#60A5FA"/>'+
+          '<rect x="21" y="32.4" width="3" height="2.4" rx="1.2" fill="#fff" opacity=".9"/>'+
+          '<rect x="36" y="32.4" width="3" height="2.4" rx="1.2" fill="#fff" opacity=".9"/>'+
+        '</g>'+
+        '<rect x="26" y="52" width="12" height="3.4" rx="1.7" fill="'+EYE+'" opacity=".55"/>'+
+      '</g></svg>';
+  }
+},
+{
+  id:'pixel', name:'Pixel Guard', tag:'像素守卫', fit:'Geek · 绝对不娘',
+  desc:'8-bit 像素方块拼装，直线直角。天然抗"娘"，且 16px 下反而最清晰。',
+  svg:function(u){
+    return '<svg class="ic" viewBox="0 0 64 64" shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg">'+
+      '<g class="ic-float" fill="#4F46E5">'+
+        '<rect class="ic-pulse" x="24" y="0" width="8" height="8" fill="#A855F7"/>'+
+        '<rect x="16" y="8" width="32" height="8" fill="#6366F1"/>'+
+        '<rect x="8" y="16" width="48" height="8"/>'+
+        '<rect x="8" y="24" width="48" height="8"/>'+
+        '<rect x="8" y="32" width="48" height="8"/>'+
+        '<rect x="8" y="40" width="48" height="8"/>'+
+        '<rect x="16" y="48" width="32" height="8" fill="#4338CA"/>'+
+        '<rect x="24" y="56" width="16" height="8" fill="#3730A3"/>'+
+        '<g class="ic-blink">'+
+          '<rect x="16" y="24" width="8" height="8" fill="#fff"/>'+
+          '<rect x="40" y="24" width="8" height="8" fill="#fff"/>'+
+          '<rect x="18" y="26" width="4" height="4" fill="'+EYE+'"/>'+
+          '<rect x="42" y="26" width="4" height="4" fill="'+EYE+'"/>'+
+        '</g>'+
+        '<rect x="24" y="40" width="16" height="4" fill="'+EYE+'" opacity=".6"/>'+
+      '</g></svg>';
+  }
+},
+{
+  id:'star', name:'Star Sentry', tag:'星芒哨兵', fit:'沿用现有四角星',
+  desc:'保留 favicon 的圆角方块与白色四角星，把星拟人成"头"并点上眼睛。品牌资产零浪费。',
+  svg:function(u){
+    return '<svg class="ic" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">'+
+      '<defs>'+G(u)+'</defs>'+
+      '<g class="ic-float">'+
+        '<rect x="4" y="8" width="56" height="50" rx="15" fill="url(#g'+u+')"/>'+
+        '<path d="M4 23 A15 15 0 0 1 19 8 L45 8 A15 15 0 0 1 60 23 Z" fill="#fff" opacity=".1"/>'+
+        '<path d="M33 12 C34.6 24 39 28.4 51 30 C39 31.6 34.6 36 33 48 C31.4 36 27 31.6 15 30 C27 28.4 31.4 24 33 12 Z" fill="#fff"/>'+
+        '<g class="ic-blink">'+
+          '<circle cx="27.5" cy="28" r="4.4" fill="'+EYE+'"/>'+
+          '<circle cx="38.5" cy="28" r="4.4" fill="'+EYE+'"/>'+
+          '<circle cx="29" cy="26.6" r="1.5" fill="#fff"/>'+
+          '<circle cx="40" cy="26.6" r="1.5" fill="#fff"/>'+
+        '</g>'+
+        '<rect x="25" y="52" width="16" height="3.4" rx="1.7" fill="#fff" opacity=".55"/>'+
+      '</g></svg>';
+  }
+},
+{
+  id:'owl', name:'Owl Scout', tag:'枭眼哨兵', fit:'守夜意象最贴',
+  desc:'猫头鹰 = 天生的哨兵。用三角耳羽与菱形装甲压住圆润感，避免滑向萌宠。',
+  svg:function(u){
+    return '<svg class="ic" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">'+
+      '<defs>'+G(u)+'</defs>'+
+      '<g class="ic-float">'+
+        '<path class="ic-wing" d="M11 19 L17.5 4 L27 17 Z" fill="#4F46E5"/>'+
+        '<path class="ic-wing" d="M53 19 L46.5 4 L37 17 Z" fill="#4F46E5"/>'+
+        '<ellipse cx="32" cy="36" rx="21" ry="23" fill="url(#g'+u+')"/>'+
+        '<path d="M11 30 A21 23 0 0 1 32 13 A21 23 0 0 1 53 30 Z" fill="#fff" opacity=".08"/>'+
+        '<path d="M9 40 L3 52 L13 50 Z" fill="#4338CA"/>'+
+        '<path d="M55 40 L61 52 L51 50 Z" fill="#4338CA"/>'+
+        '<path d="M14 21.5 L29 25.5" stroke="'+EYE+'" stroke-width="2.6" stroke-linecap="round" opacity=".45"/>'+
+        '<path d="M50 21.5 L35 25.5" stroke="'+EYE+'" stroke-width="2.6" stroke-linecap="round" opacity=".45"/>'+
+        '<g class="ic-blink">'+
+          '<circle cx="23" cy="32" r="9.5" fill="#fff"/>'+
+          '<circle cx="41" cy="32" r="9.5" fill="#fff"/>'+
+          '<circle cx="23" cy="33" r="4.4" fill="'+EYE+'"/>'+
+          '<circle cx="41" cy="33" r="4.4" fill="'+EYE+'"/>'+
+          '<circle cx="24.6" cy="31.4" r="1.6" fill="#fff"/>'+
+          '<circle cx="42.6" cy="31.4" r="1.6" fill="#fff"/>'+
+        '</g>'+
+        '<path d="M32 41 L25.5 47.5 L32 52 L38.5 47.5 Z" fill="#fff" opacity=".85"/>'+
+        '<path d="M32 43.5 L29 47.5 L32 50 L35 47.5 Z" fill="#4F46E5" opacity=".55"/>'+
+      '</g></svg>';
+  }
+},
+{
+  id:'cube', name:'Cube Bot', tag:'方块小卫', fit:'小尺寸最清晰',
+  desc:'最简几何：圆角方块 + 方眼 + 一字嘴 + 短天线。元素最少，缩到 16px 依然成立。',
+  svg:function(u){
+    return '<svg class="ic" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">'+
+      '<defs>'+G(u)+'</defs>'+
+      '<g class="ic-float">'+
+        '<g class="ic-pulse">'+
+          '<path d="M25.5 5 A9 9 0 0 1 38.5 5" fill="none" stroke="#A855F7" stroke-width="2.4" stroke-linecap="round"/>'+
+        '</g>'+
+        '<path d="M32 12 L32 17" stroke="#6D28D9" stroke-width="2.8" stroke-linecap="round"/>'+
+        '<circle cx="32" cy="10.5" r="3" fill="#A855F7"/>'+
+        '<rect x="10" y="16" width="44" height="40" rx="13" fill="url(#g'+u+')"/>'+
+        '<path d="M10 29 A13 13 0 0 1 23 16 L41 16 A13 13 0 0 1 54 29 Z" fill="#fff" opacity=".1"/>'+
+        '<rect x="5" y="30" width="6" height="13" rx="3" fill="#4F46E5"/>'+
+        '<rect x="53" y="30" width="6" height="13" rx="3" fill="#4F46E5"/>'+
+        '<g class="ic-blink">'+
+          '<rect x="17" y="28" width="12" height="13" rx="4" fill="#fff"/>'+
+          '<rect x="35" y="28" width="12" height="13" rx="4" fill="#fff"/>'+
+          '<rect x="20.5" y="32.5" width="5.4" height="6.4" rx="2.4" fill="'+EYE+'"/>'+
+          '<rect x="38.5" y="32.5" width="5.4" height="6.4" rx="2.4" fill="'+EYE+'"/>'+
+          '<rect x="21.8" y="33.8" width="2" height="2" rx="1" fill="#fff"/>'+
+          '<rect x="39.8" y="33.8" width="2" height="2" rx="1" fill="#fff"/>'+
+        '</g>'+
+        '<rect x="25" y="47.5" width="14" height="3.6" rx="1.8" fill="#fff" opacity=".8"/>'+
+      '</g></svg>';
+  }
+}
+];
+
+/* ================= 字标构建 ================= */
+function wmHTML(text, size){
+  var out = '<div class="wm b-squash" style="--ws:'+size+'px" aria-label="'+text+'">';
+  for(var i=0;i<text.length;i++){
+    var c = text[i] === ' ' ? '\u00A0' : text[i];
+    out += '<span class="ch" style="--i:'+i+'"><span class="ch-txt">'+c+'</span><span class="ch-sh"></span></span>';
+  }
+  return out + '</div>';
+}
+
+/* ================= 渲染 ================= */
+var uid = 0;
+var cur = ICONS[0];
+var grid = document.getElementById('iconGrid');
+
+ICONS.forEach(function(ic, i){
+  var card = document.createElement('article');
+  card.className = 'card' + (i===0 ? ' picked' : '');
+  card.innerHTML =
+    '<p class="iname">'+ic.name+'<em>'+ic.tag+'</em></p>'+
+    '<p class="idesc">'+ic.desc+'</p>'+
+    '<div class="stage">'+ic.svg('a'+(i))+'</div>'+
+    '<button class="pick">应用此图标</button>';
+  card.querySelector('.pick').addEventListener('click', function(){
+    cur = ic;
+    grid.querySelectorAll('.card').forEach(function(x){ x.classList.remove('picked'); });
+    card.classList.add('picked');
+    renderAll();
+  });
+  grid.appendChild(card);
+});
+
+// 尺寸实测
+var sizeRow = document.getElementById('sizeRow');
+[16,20,28,38,56,96].forEach(function(s){
+  var col = document.createElement('div');
+  col.className = 'col';
+  col.style.setProperty('--s', s+'px');
+  col.innerHTML = '<div class="box" data-sz></div><span>'+s+'px</span>';
+  sizeRow.appendChild(col);
+});
+
+// 场景
+function renderAll(){
+  document.querySelectorAll('[data-sz]').forEach(function(box){
+    box.innerHTML = cur.svg('s'+uid++);
+  });
+  document.querySelectorAll('[data-slot="icon"]').forEach(function(el){
+    el.innerHTML = cur.svg('b'+uid++);
+  });
+  document.querySelectorAll('[data-slot="iconBig"]').forEach(function(el){
+    el.innerHTML = cur.svg('h'+uid++) + wmHTML('Sentinel', 44);
+  });
+  document.getElementById('bar').innerHTML =
+    '已定稿部件：<b>字标 = Fredoka × Squash 完整弹跳</b>（首屏 Hero 已采纳）　|　'+
+    '当前图标：<b>'+cur.name+' · '+cur.tag+'</b>（'+cur.fit+'）';
+}
+
+// 动画开关
+[['cFloat','no-float'],['cBlink','no-blink'],['cRadar','no-radar'],
+ ['cPulse','no-pulse'],['cScan','no-scan']].forEach(function(p){
+  document.getElementById(p[0]).addEventListener('change', function(){
+    document.body.classList.toggle(p[1], !this.checked);
+  });
+});
+
+// 底色
+var bgBtn = document.getElementById('bgBtn');
+var BGS = ['light','dark','tile'], BGL = ['浅','深','色块底'];
+var bi = 0;
+bgBtn.addEventListener('click', function(){
+  bi = (bi+1) % 3;
+  document.body.dataset.bg = BGS[bi];
+  this.textContent = '底色：' + BGL[bi];
+});
+
+// 暂停全部
+var animBtn = document.getElementById('animBtn'), paused = false;
+animBtn.addEventListener('click', function(){
+  paused = !paused;
+  document.body.classList.toggle('no-anim', paused);
+  this.textContent = paused ? '全部播放' : '全部暂停';
+});
+
+renderAll();
+})();
+</script>
+</body>
+</html>

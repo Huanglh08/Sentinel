@@ -243,7 +243,7 @@ export function AgentPromptPage() {
             <>
               <header className="agent-prompt-pane__header">
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <h2 className="text-sm font-semibold text-slate-900">{activeSlot.displayName}</h2>
+                  <h2 className="text-sm font-semibold text-slate-100">{activeSlot.displayName}</h2>
                   {activeSlot.effective ? (
                     <Badge className="text-[11px] font-normal">当前生效</Badge>
                   ) : (

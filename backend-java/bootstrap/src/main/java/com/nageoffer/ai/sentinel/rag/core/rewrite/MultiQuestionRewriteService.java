@@ -148,8 +148,8 @@ public class MultiQuestionRewriteService implements QueryRewriteService {
 
         return ChatRequest.builder()
                 .messages(messages)
-                .temperature(0.1D)
-                .topP(0.3D)
+                .temperature(0D)
+                .topP(0.1D)
                 .thinking(false)
                 .build();
     }

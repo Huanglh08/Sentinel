@@ -9,5 +9,8 @@ rank-bm25
 numpy
 faiss-cpu
 psycopg[binary]
+redis
 dashscope
 jinja2
+apscheduler>=3.10,<4
+mcp>=1.2,<2

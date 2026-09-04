@@ -69,7 +69,31 @@ public enum AgentPromptSlot {
     RECOMMENDED_QUESTIONS("推荐问题", Group.COMMON,
             Set.of(OrchestrationMode.WORKFLOW, OrchestrationMode.AGENT),
             null,
-            Set.of("{chunks}", "{count}", "{question}", "{answer}"));
+            Set.of("{chunks}", "{count}", "{question}", "{answer}")),
+
+    /**
+     * 案件调查三段式（P2 GitOps）：调查链路不经过 WorkFlow/Agent 编排，
+     * 但槽位机制一致 —— 内容为空时代码常量兜底，配置后覆盖（__KEY__ 占位符）
+     */
+    CASE_TRIAGE("案件分诊", Group.CASE,
+            Set.of(OrchestrationMode.WORKFLOW, OrchestrationMode.AGENT),
+            null,
+            Set.of("__SKILL_CATALOG__", "__CLUE__", "__RULE_HINTS__")),
+
+    CASE_INVESTIGATOR("案件调查员", Group.CASE,
+            Set.of(OrchestrationMode.WORKFLOW, OrchestrationMode.AGENT),
+            null,
+            Set.of("__TOOL_CATALOG__")),
+
+    CASE_REPORTER("案件报告", Group.CASE,
+            Set.of(OrchestrationMode.WORKFLOW, OrchestrationMode.AGENT),
+            null,
+            Set.of("__CLUE__", "__TRIAGE__", "__STEPS__")),
+
+    CASE_RULE_MINER("规则挖掘", Group.CASE,
+            Set.of(OrchestrationMode.WORKFLOW, OrchestrationMode.AGENT),
+            null,
+            Set.of("__EXPERIENCE__"));
 
     private final String displayName;
 
@@ -123,7 +147,8 @@ public enum AgentPromptSlot {
 
         WORKFLOW("WorkFlow 专属"),
         AGENT("Agent 专属"),
-        COMMON("通用");
+        COMMON("通用"),
+        CASE("案件调查");
 
         private final String displayName;
 

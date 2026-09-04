@@ -38,7 +38,10 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Deque;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -101,18 +104,35 @@ public class EvalController {
 
     /**
      * 摊平 intentChunks（Map<intentId, List<RetrievedChunk>>），按 chunk id 去重并保留首次顺序
+     * <p>
+     * 摊平前先做意图轮转交错（round-robin）：intentChunks 按意图分组且组内连续，
+     * 直接顺序摊平会让首个意图的整段候选独占头部，多意图查询下后续意图的文档
+     * 被挤出 topN 截断面（跨意图覆盖塌缩）。交错后头部名额在意图间公平分配，
+     * 与「头部证据应覆盖全部子问题」的检索质量预期一致
      */
     private List<RetrievedChunk> flattenChunks(RetrievalContext rc) {
         if (rc == null || CollUtil.isEmpty(rc.getIntentChunks())) {
             return Collections.emptyList();
         }
-        Set<String> seen = new LinkedHashSet<>();
-        return rc.getIntentChunks().values().stream()
+        Deque<Deque<RetrievedChunk>> queues = rc.getIntentChunks().values().stream()
                 .filter(CollUtil::isNotEmpty)
-                .flatMap(List::stream)
-                .filter(c -> c != null && StrUtil.isNotBlank(c.getId()))
-                .filter(c -> seen.add(c.getId()))
-                .collect(Collectors.toList());
+                .map(chunks -> chunks.stream()
+                        .filter(c -> c != null && StrUtil.isNotBlank(c.getId()))
+                        .collect(Collectors.toCollection(ArrayDeque::new)))
+                .collect(Collectors.toCollection(ArrayDeque::new));
+        List<RetrievedChunk> interleaved = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        while (!queues.isEmpty()) {
+            Deque<RetrievedChunk> queue = queues.poll();
+            RetrievedChunk chunk = queue.poll();
+            if (chunk != null && seen.add(chunk.getId())) {
+                interleaved.add(chunk);
+            }
+            if (!queue.isEmpty()) {
+                queues.add(queue);
+            }
+        }
+        return interleaved;
     }
 
     /**

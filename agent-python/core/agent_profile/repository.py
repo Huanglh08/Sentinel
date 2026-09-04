@@ -10,6 +10,7 @@ import time
 
 from core.agent_profile.do import AgentPromptDO, AgentProfileDO
 from core.db import get_pool
+from psycopg.rows import dict_row
 
 _logger = logging.getLogger("sentinel.agent_profile.repo")
 
@@ -59,7 +60,7 @@ class AgentProfileRepository:
     """1:1 翻译 ragent AgentProfileMapper。"""
 
     def select_all(self) -> list[AgentProfileDO]:
-        with get_pool().connection() as conn, conn.cursor() as cur:
+        with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 "SELECT id, name, description, avatar, builtin, active, "
                 "create_by, update_by, create_time, update_time, deleted "
@@ -68,7 +69,7 @@ class AgentProfileRepository:
             return [_row_to_profile(r) for r in cur.fetchall()]
 
     def select_by_id(self, agent_id: str) -> AgentProfileDO | None:
-        with get_pool().connection() as conn, conn.cursor() as cur:
+        with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 "SELECT id, name, description, avatar, builtin, active, "
                 "create_by, update_by, create_time, update_time, deleted "
@@ -78,7 +79,7 @@ class AgentProfileRepository:
             return _row_to_profile(row) if row else None
 
     def select_first_by_flag(self, flag: str) -> AgentProfileDO | None:
-        with get_pool().connection() as conn, conn.cursor() as cur:
+        with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 f"SELECT id, name, description, avatar, builtin, active, "
                 f"create_by, update_by, create_time, update_time, deleted "
@@ -89,7 +90,7 @@ class AgentProfileRepository:
             return _row_to_profile(row) if row else None
 
     def exists_by_name(self, name: str, exclude_id: str | None) -> bool:
-        with get_pool().connection() as conn, conn.cursor() as cur:
+        with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             if exclude_id:
                 cur.execute(
                     "SELECT 1 FROM t_agent_profile WHERE deleted = 0 AND name = %s "
@@ -104,7 +105,7 @@ class AgentProfileRepository:
 
     def insert(self, profile: AgentProfileDO) -> str:
         pid = profile.id or next_id()
-        with get_pool().connection() as conn, conn.cursor() as cur:
+        with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 "INSERT INTO t_agent_profile (id, name, description, avatar, "
                 "builtin, active, create_by, update_by) "
@@ -117,21 +118,21 @@ class AgentProfileRepository:
     def update_fields(self, agent_id: str, **fields) -> None:
         cols = ", ".join(f"{k} = %s" for k in fields)
         params = list(fields.values()) + [agent_id]
-        with get_pool().connection() as conn, conn.cursor() as cur:
+        with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 f"UPDATE t_agent_profile SET {cols} WHERE id = %s AND deleted = 0",
                 params,
             )
 
     def update_active_zero_where_active_one(self) -> int:
-        with get_pool().connection() as conn, conn.cursor() as cur:
+        with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 "UPDATE t_agent_profile SET active = 0 WHERE active = 1 AND deleted = 0"
             )
             return cur.rowcount
 
     def delete(self, agent_id: str) -> None:
-        with get_pool().connection() as conn, conn.cursor() as cur:
+        with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 "UPDATE t_agent_profile SET deleted = 1 WHERE id = %s AND deleted = 0",
                 (agent_id,),
@@ -142,7 +143,7 @@ class AgentPromptRepository:
     """1:1 翻译 ragent AgentPromptMapper。"""
 
     def select_by_agent(self, agent_id: str) -> list[AgentPromptDO]:
-        with get_pool().connection() as conn, conn.cursor() as cur:
+        with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 "SELECT id, agent_id, slot_key, content, create_by, update_by, "
                 "create_time, update_time, deleted FROM t_agent_prompt "
@@ -152,7 +153,7 @@ class AgentPromptRepository:
 
     def select_configured(self) -> list[AgentPromptDO]:
         """1:1 对齐 loadConfiguredSlots：只投影 agent_id / slot_key，且 content 非空。"""
-        with get_pool().connection() as conn, conn.cursor() as cur:
+        with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 "SELECT agent_id, slot_key FROM t_agent_prompt "
                 "WHERE deleted = 0 AND content IS NOT NULL AND content <> ''"
@@ -161,7 +162,7 @@ class AgentPromptRepository:
                     for r in cur.fetchall()]
 
     def exists(self, agent_id: str, slot_key: str) -> bool:
-        with get_pool().connection() as conn, conn.cursor() as cur:
+        with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 "SELECT 1 FROM t_agent_prompt WHERE deleted = 0 AND agent_id = %s "
                 "AND slot_key = %s LIMIT 1", (agent_id, slot_key)
@@ -169,7 +170,7 @@ class AgentPromptRepository:
             return cur.fetchone() is not None
 
     def update_content(self, agent_id: str, slot_key: str, content) -> None:
-        with get_pool().connection() as conn, conn.cursor() as cur:
+        with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 "UPDATE t_agent_prompt SET content = %s WHERE deleted = 0 "
                 "AND agent_id = %s AND slot_key = %s",
@@ -177,7 +178,7 @@ class AgentPromptRepository:
             )
 
     def insert(self, agent_id: str, slot_key: str, content: str) -> None:
-        with get_pool().connection() as conn, conn.cursor() as cur:
+        with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 "INSERT INTO t_agent_prompt (id, agent_id, slot_key, content) "
                 "VALUES (%s, %s, %s, %s)",
@@ -185,7 +186,7 @@ class AgentPromptRepository:
             )
 
     def delete_by_agent(self, agent_id: str) -> None:
-        with get_pool().connection() as conn, conn.cursor() as cur:
+        with get_pool().connection() as conn, conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
                 "UPDATE t_agent_prompt SET deleted = 1 WHERE agent_id = %s AND deleted = 0",
                 (agent_id,),

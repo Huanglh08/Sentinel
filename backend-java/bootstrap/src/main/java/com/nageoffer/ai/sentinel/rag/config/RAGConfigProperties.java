@@ -79,4 +79,46 @@ public class RAGConfigProperties {
      */
     @Value("${rag.citation.enabled:false}")
     private Boolean citationEnabled;
+
+    /**
+     * 双模型 rerank 相关性门控开关（P1 负样本治理）
+     * <p>
+     * 开启后由 {@code RelevanceGatePostProcessor}（Rerank 之后）调用本地双模型打分服务
+     * （agent-python /retrieval/rerank-gate），当 bge 与 qwen3 两个模型的 top1 分数
+     * 同时低于阈值（AND 门控）时判定"库中大概率无相关信息"，切空检索结果走拒答。
+     * 打分服务不可用/超时/异常时 fail-open 放行，绝不因门控故障误拒
+     * 默认值：{@code true}（fail-open 语义下开启无风险）
+     */
+    @Value("${rag.retrieval-gate.enabled:true}")
+    private Boolean retrievalGateEnabled;
+
+    /**
+     * 双模型门控打分服务地址（agent-python FastAPI）
+     */
+    @Value("${rag.retrieval-gate.url:http://127.0.0.1:8001/retrieval/rerank-gate}")
+    private String retrievalGateUrl;
+
+    /**
+     * 打分服务 HTTP 超时（毫秒）；超时按 fail-open 放行
+     */
+    @Value("${rag.retrieval-gate.timeout-ms:5000}")
+    private Long retrievalGateTimeoutMs;
+
+    /**
+     * bge-reranker-v2-m3 的 top1 切空阈值（sigmoid 概率）
+     */
+    @Value("${rag.retrieval-gate.bge-threshold:0.10}")
+    private Double retrievalGateBgeThreshold;
+
+    /**
+     * Qwen3-Reranker-0.6B 的 top1 切空阈值（sigmoid(yes-no) 概率）
+     */
+    @Value("${rag.retrieval-gate.qwen3-threshold:0.20}")
+    private Double retrievalGateQwen3Threshold;
+
+    /**
+     * 参与打分的最大 chunk 数（取 Rerank 后前 N 条，门控只看 top1）
+     */
+    @Value("${rag.retrieval-gate.top-n:8}")
+    private Integer retrievalGateTopN;
 }

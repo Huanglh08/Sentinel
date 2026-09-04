@@ -24,7 +24,9 @@ import {
   Users,
   FolderKanban,
   Workflow,
-  Gavel
+  Gavel,
+  Activity,
+  Radar
 } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
 import { Button } from "@/components/ui/button";
@@ -39,6 +41,19 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+
+const SentinelAdminMark = ({ className = "h-10 w-10" }: { className?: string }) => (
+  <svg viewBox="0 0 64 64" aria-hidden="true" className={className}>
+    <defs>
+      <linearGradient id="sentinel-admin-gradient" x1="8" y1="8" x2="56" y2="54" gradientUnits="userSpaceOnUse">
+        <stop stopColor="#22D3EE" /><stop offset=".48" stopColor="#3B82F6" /><stop offset="1" stopColor="#7C3AED" />
+      </linearGradient>
+    </defs>
+    <path d="M32 7 53 19v22L32 53 11 41V19Z" fill="url(#sentinel-admin-gradient)" />
+    <path d="M20 30h6l3-5 6 10 3-5h6" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M32 7 53 19v22L32 53 11 41V19Z" fill="none" stroke="#fff" strokeOpacity=".3" strokeWidth="1.6" />
+  </svg>
+);
 import { changePassword } from "@/services/userService";
 import {
   getKnowledgeBases,
@@ -142,7 +157,7 @@ const menuGroups: MenuGroup[] = [
       {
         path: "/admin/traces",
         label: "链路追踪",
-        icon: Workflow
+        icon: Radar
       },
       {
         path: "/admin/change-logs",
@@ -200,6 +215,7 @@ export function AdminLayout() {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
   const [collapsed, setCollapsed] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(190);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [passwordSubmitting, setPasswordSubmitting] = useState(false);
   const [passwordForm, setPasswordForm] = useState({
@@ -441,25 +457,50 @@ export function AdminLayout() {
   const hasQuery = kbQuery.trim().length > 0;
   const showSuggest = searchFocused && hasQuery;
 
+  const beginSidebarResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (collapsed) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const startX = event.clientX;
+    const startWidth = sidebarWidth;
+    const handleMove = (moveEvent: PointerEvent) => {
+      setSidebarWidth(Math.min(320, Math.max(160, startWidth + moveEvent.clientX - startX)));
+    };
+    const handleUp = () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+    };
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+  };
+
   return (
-    <div className="admin-layout flex h-screen">
+    <div className="admin-layout flex h-screen" style={{ "--admin-sidebar-width": `${sidebarWidth}px` } as React.CSSProperties}>
       <aside className={cn("admin-sidebar", collapsed && "admin-sidebar--collapsed")}>
-        <div className="admin-sidebar__brand">
-          <div className={cn("flex items-center gap-3", collapsed && "justify-center")}>
-            <img src="/favicon.svg" alt="Logo" className="h-10 w-10 shrink-0 rounded-xl" />
-            {!collapsed && (
-              <div className="min-w-0">
-                <h1 className="admin-sidebar__title">Sentinel AI 管理后台</h1>
-                <p className="admin-sidebar__subtitle">Knowledge Console</p>
-              </div>
-            )}
+        {!collapsed && <div className="admin-sidebar__resize-handle" onPointerDown={beginSidebarResize} role="separator" aria-label="调整侧栏宽度" />}
+        <div className="admin-sidebar__brand sentinel-brand">
+          <div className={cn("flex items-center gap-2", collapsed && "justify-center")}>
+            <div className="sentinel-brand__icon h-10 w-10 shrink-0">
+              <SentinelAdminMark className="h-10 w-10 sentinel-mark-anim" />
+            </div>
+            {!collapsed && <div className="sentinel-wordmark" aria-label="sentinel">sentinel</div>}
           </div>
         </div>
 
         <nav className="flex-1 space-y-4 px-2 pb-4">
+          <div className="mb-3 border-b border-white/10 pb-3">
+            <Link
+              to="/chat"
+              title={collapsed ? "返回对话" : undefined}
+              className={cn("admin-sidebar__item", collapsed && "justify-center")}
+            >
+              <span className="admin-sidebar__item-indicator" />
+              <MessageSquare className="admin-sidebar__item-icon" />
+              {collapsed ? <span className="sr-only">返回对话</span> : <span>返回对话</span>}
+            </Link>
+          </div>
           {menuGroups.map((group) => (
             <div key={group.title} className="space-y-2">
-              {!collapsed && (
+              {!collapsed && group.title !== "导航" && (
                 <p className="admin-sidebar__group-title">{group.title}</p>
               )}
               <div className="space-y-1">
@@ -652,7 +693,7 @@ export function AdminLayout() {
                             }}
                             className="admin-topbar-suggest-item"
                           >
-                            <span className="font-medium text-slate-900">{kb.name}</span>
+                            <span className="font-medium text-slate-100">{kb.name}</span>
                             <span className="text-xs text-slate-400">
                               {kb.collectionName || "未设置 Collection"}
                             </span>
@@ -673,7 +714,7 @@ export function AdminLayout() {
                             }}
                             className="admin-topbar-suggest-item"
                           >
-                            <span className="font-medium text-slate-900">{doc.docName}</span>
+                            <span className="font-medium text-slate-100">{doc.docName}</span>
                             <span className="text-xs text-slate-400">
                               {doc.kbName || `知识库 ${doc.kbId}`}
                             </span>
@@ -689,25 +730,17 @@ export function AdminLayout() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                className="hidden items-center gap-2 sm:inline-flex"
-                onClick={() => window.open("/chat", "_blank")}
-              >
-                <MessageSquare className="h-4 w-4" />
-                返回聊天
-              </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    className="flex items-center gap-2 rounded-full border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-600 shadow-sm"
+                    className="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-sm text-slate-300 shadow-sm"
                     aria-label="用户菜单"
                   >
                     <Avatar
                       name={user?.username || "管理员"}
                       src={showAvatar ? avatarUrl : undefined}
-                      className="h-8 w-8 border-slate-200 bg-indigo-50 text-xs font-semibold text-indigo-600"
+                      className="h-8 w-8 border-white/10 bg-white/[0.08] text-xs font-semibold text-cyan-300"
                     />
                     <span className="hidden sm:inline">{user?.username || "管理员"}</span>
                     <ChevronDown className="h-4 w-4 text-slate-400" />
@@ -732,7 +765,7 @@ export function AdminLayout() {
           </div>
         </header>
 
-        <div className={cn("admin-content", isGraphRoute && "admin-content--full")}>
+        <div key={location.pathname} className={cn("admin-content", isGraphRoute && "admin-content--full")}>
           {!isGraphRoute && (
             <nav className="admin-breadcrumbs" aria-label="面包屑">
               {breadcrumbs.map((item, index) => {
@@ -742,7 +775,7 @@ export function AdminLayout() {
                     {item.to && !isLast ? (
                       <Link to={item.to}>{item.label}</Link>
                     ) : (
-                      <span className={isLast ? "text-slate-700" : undefined}>{item.label}</span>
+                      <span className={isLast ? "text-slate-200" : undefined}>{item.label}</span>
                     )}
                     {!isLast && <span>/</span>}
                   </span>
@@ -770,7 +803,7 @@ export function AdminLayout() {
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-2">
-              <label className="text-sm font-medium text-slate-700">当前密码</label>
+              <label className="text-sm font-medium text-slate-200">当前密码</label>
               <Input
                 type="password"
                 value={passwordForm.currentPassword}
@@ -781,7 +814,7 @@ export function AdminLayout() {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-slate-700">新密码</label>
+              <label className="text-sm font-medium text-slate-200">新密码</label>
               <Input
                 type="password"
                 value={passwordForm.newPassword}
@@ -792,7 +825,7 @@ export function AdminLayout() {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-slate-700">确认新密码</label>
+              <label className="text-sm font-medium text-slate-200">确认新密码</label>
               <Input
                 type="password"
                 value={passwordForm.confirmPassword}

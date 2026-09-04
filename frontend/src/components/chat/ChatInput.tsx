@@ -62,10 +62,10 @@ export function ChatInput() {
     <div className="space-y-4">
       <div
         className={cn(
-          "relative flex flex-col rounded-2xl border bg-white px-4 pt-3 pb-2 transition-all duration-200",
+          "sentinel-chat-input relative flex flex-col rounded-2xl border px-4 pt-3 pb-2 transition-all duration-200",
           isFocused
-            ? "border-[#D4D4D4] shadow-[0_4px_12px_rgba(0,0,0,0.06)]"
-            : "border-[#E5E5E5] hover:border-[#D4D4D4]"
+            ? "border-cyan-400/70 shadow-[0_0_28px_rgba(34,211,238,0.12)]"
+            : "border-white/10 hover:border-cyan-400/40"
         )}
       >
         <div className="relative">
@@ -74,7 +74,7 @@ export function ChatInput() {
             value={value}
             onChange={(event) => setValue(event.target.value)}
             placeholder={deepThinkingEnabled ? "输入需要深度分析的问题..." : "输入你的问题..."}
-            className="max-h-40 min-h-[44px] w-full resize-none border-0 bg-transparent px-2 pt-2 pb-2 pr-2 text-[15px] text-[#333333] shadow-none placeholder:text-[#999999] focus-visible:ring-0"
+            className="max-h-40 min-h-[44px] w-full resize-none border-0 bg-transparent px-2 pt-2 pb-2 pr-2 text-[15px] text-slate-100 shadow-none placeholder:text-slate-500 focus-visible:ring-0"
             rows={1}
             onFocus={() => setIsFocused(true)}
             onBlur={() => setIsFocused(false)}
@@ -96,7 +96,7 @@ export function ChatInput() {
             }}
             aria-label="聊天输入框"
           />
-          <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-[10px] bg-gradient-to-b from-white/0 via-white/40 to-white/90" />
+          <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-[10px] bg-gradient-to-b from-transparent via-slate-950/40 to-slate-950/90" />
         </div>
         <div className="relative mt-2 flex items-center">
           <button
@@ -107,8 +107,8 @@ export function ChatInput() {
             className={cn(
               "absolute left-0 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all",
               deepThinkingEnabled
-                ? "border-[#BFDBFE] bg-[#DBEAFE] text-[#2563EB]"
-                : "border-transparent bg-[#F5F5F5] text-[#999999] hover:bg-[#EEEEEE]",
+                ? "border-cyan-400/40 bg-cyan-400/10 text-cyan-300"
+                : "border-white/10 bg-white/5 text-slate-500 hover:bg-white/10 hover:text-slate-300",
               isStreaming && "cursor-not-allowed opacity-60"
             )}
           >
@@ -128,10 +128,10 @@ export function ChatInput() {
             className={cn(
               "ml-auto rounded-full p-2.5 transition-all duration-200",
               isStreaming
-                ? "bg-[#FEE2E2] text-[#EF4444] hover:bg-[#FECACA]"
-                : hasContent
-                  ? "bg-[#3B82F6] text-white hover:bg-[#2563EB]"
-                  : "cursor-not-allowed bg-[#F5F5F5] text-[#CCCCCC]"
+              ? "bg-rose-500/20 text-rose-300 hover:bg-rose-500/30"
+              : hasContent
+                ? "bg-gradient-to-r from-cyan-400 via-blue-500 to-violet-600 text-white shadow-[0_0_18px_rgba(34,211,238,0.25)] hover:brightness-110"
+                : "cursor-not-allowed bg-white/10 text-slate-600"
             )}
           >
             {isStreaming ? <Square className="h-4 w-4" /> : <Send className="h-4 w-4" />}
@@ -146,14 +146,14 @@ export function ChatInput() {
           </span>
         </p>
       ) : null}
-      <p className="text-center text-xs text-[#999999]">
-        <kbd className="rounded bg-[#F5F5F5] px-1.5 py-0.5 text-[#666666]">Enter</kbd> 发送
+      <p className="text-center text-xs text-slate-600">
+        <kbd className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-slate-400">Enter</kbd> 发送
         <span className="px-1.5">·</span>
-        <kbd className="rounded bg-[#F5F5F5] px-1.5 py-0.5 text-[#666666]">
+        <kbd className="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-slate-400">
           Shift + Enter
         </kbd>{" "}
         换行
-        {isStreaming ? <span className="ml-2 animate-pulse-soft">生成中...</span> : null}
+        {isStreaming ? <span className="ml-2 animate-pulse-soft text-cyan-300">生成中...</span> : null}
       </p>
     </div>
   );

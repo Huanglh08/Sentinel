@@ -38,6 +38,7 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -50,6 +51,15 @@ import java.util.Set;
 @Slf4j
 @RequiredArgsConstructor
 public class BaiLianRerankClient implements RerankClient {
+
+    /**
+     * rerank 相关性分数阈值（rag.rerank.min-score，0=不过滤）。
+     * 低于阈值的 chunk 在真实 rerank 输出中被丢弃：库中无相关信息时宁可空检索，
+     * 由上层走「库中无此信息」拒答，杜绝虚假引用。仅作用于 relevance_score
+     * （向量余弦候选未经 rerank 不受影响）
+     */
+    @Value("${rag.rerank.min-score:0.0}")
+    private float minRelevanceScore;
 
     @Qualifier("syncHttpClient")
     private final OkHttpClient httpClient;
@@ -137,6 +147,8 @@ public class BaiLianRerankClient implements RerankClient {
 
         List<RetrievedChunk> reranked = new ArrayList<>();
         Set<String> addedIds = new HashSet<>();
+        Set<String> excludedIds = new HashSet<>();
+        int excludedCount = 0;
 
         for (JsonElement elem : results) {
             if (!elem.isJsonObject()) {
@@ -160,6 +172,13 @@ public class BaiLianRerankClient implements RerankClient {
                 score = item.get("relevance_score").getAsFloat();
             }
 
+            // 低分 chunk 丢弃并记入 excludedIds：补齐循环不得将其救回
+            if (score != null && minRelevanceScore > 0 && score < minRelevanceScore) {
+                excludedIds.add(src.getId());
+                excludedCount++;
+                continue;
+            }
+
             // 整体拷贝仅覆盖分数：逐字段白名单在 RetrievedChunk 新增字段时会静默漏拷（collectionName 曾因此丢失、意图归属整体失效）
             RetrievedChunk hit = score != null
                     ? src.toBuilder()
@@ -176,6 +195,9 @@ public class BaiLianRerankClient implements RerankClient {
 
         if (reranked.size() < topN) {
             for (RetrievedChunk c : candidates) {
+                if (excludedIds.contains(c.getId())) {
+                    continue;
+                }
                 if (addedIds.add(c.getId())) {
                     reranked.add(c);
                 }
@@ -183,6 +205,10 @@ public class BaiLianRerankClient implements RerankClient {
                     break;
                 }
             }
+        }
+
+        if (excludedCount > 0) {
+            log.info("rerank 低分过滤: {} 条 relevance_score 低于阈值 {} 被丢弃", excludedCount, minRelevanceScore);
         }
 
         return reranked;

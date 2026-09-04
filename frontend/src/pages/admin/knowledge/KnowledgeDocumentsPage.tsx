@@ -857,7 +857,7 @@ export function KnowledgeDocumentsPage() {
                             </button>
                             {doc.chunksEdited ? (
                               <span
-                                className="shrink-0 rounded-full bg-amber-50 px-1.5 py-px text-[10px] font-medium text-amber-700 ring-1 ring-amber-200"
+                                className="shrink-0 rounded-full bg-amber-400/10 px-1.5 py-px text-[10px] font-medium text-amber-300 ring-1 ring-amber-400/30"
                                 title="该文档存在被手工编辑过的分块，重新分块会丢失"
                               >
                                 已编辑
@@ -1348,30 +1348,30 @@ export function KnowledgeDocumentsPage() {
                   {/* 耗时指标卡片 */}
                   <div className={cn("grid gap-3", isPipelineLog ? "grid-cols-2 md:grid-cols-3" : "grid-cols-2 md:grid-cols-3 lg:grid-cols-4")}>
                     {!isPipelineLog && (
-                      <div className="rounded-lg border bg-slate-50/50 p-3">
+                      <div className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
                         <div className="text-xs text-muted-foreground mb-1">文本提取</div>
                         <div className="text-lg font-semibold tabular-nums">{formatDuration(log.extractDuration)}</div>
                       </div>
                     )}
-                    <div className="rounded-lg border bg-slate-50/50 p-3">
+                    <div className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
                       <div className="text-xs text-muted-foreground mb-1">{chunkLabel}</div>
                       <div className="text-lg font-semibold tabular-nums">{formatDuration(log.chunkDuration)}</div>
                     </div>
                     {!isPipelineLog && (
-                      <div className="rounded-lg border bg-slate-50/50 p-3">
+                      <div className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
                         <div className="text-xs text-muted-foreground mb-1">向量化</div>
                         <div className="text-lg font-semibold tabular-nums">{formatDuration(log.embedDuration)}</div>
                       </div>
                     )}
-                    <div className="rounded-lg border bg-slate-50/50 p-3">
+                    <div className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
                       <div className="text-xs text-muted-foreground mb-1">持久化</div>
                       <div className="text-lg font-semibold tabular-nums">{formatDuration(log.persistDuration)}</div>
                     </div>
-                    <div className="rounded-lg border bg-slate-50/50 p-3">
+                    <div className="rounded-lg border border-white/10 bg-white/[0.035] p-3">
                       <div className="text-xs text-muted-foreground mb-1">其他</div>
                       <div className="text-lg font-semibold tabular-nums">{formatDuration(log.otherDuration)}</div>
                     </div>
-                    <div className="rounded-lg border bg-blue-50 p-3">
+                    <div className="rounded-lg border border-cyan-400/20 bg-cyan-400/10 p-3">
                       <div className="text-xs text-blue-600 mb-1">总耗时</div>
                       <div className="text-lg font-bold tabular-nums text-blue-600">{formatDuration(log.totalDuration)}</div>
                     </div>

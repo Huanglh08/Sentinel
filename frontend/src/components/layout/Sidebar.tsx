@@ -14,6 +14,25 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
+const SentinelMark = ({ className = "h-10 w-10" }: { className?: string }) => (
+  <svg viewBox="0 0 64 64" aria-hidden="true" className={`${className} sentinel-mark-anim`}>
+    <defs>
+      <linearGradient id="sentinel-mark-gradient" x1="8" y1="8" x2="56" y2="54" gradientUnits="userSpaceOnUse">
+        <stop stopColor="#22D3EE" />
+        <stop offset=".48" stopColor="#3B82F6" />
+        <stop offset="1" stopColor="#7C3AED" />
+      </linearGradient>
+      <clipPath id="sentinel-mark-clip"><path d="M32 7 53 19v22L32 53 11 41V19Z" /></clipPath>
+    </defs>
+    <path d="M32 7 53 19v22L32 53 11 41V19Z" fill="url(#sentinel-mark-gradient)" />
+    <path d="M32 7 53 19v7L32 38 11 26v-7Z" fill="#fff" opacity=".12" />
+    <g clipPath="url(#sentinel-mark-clip)">
+      <path d="M20 30h6l3-5 6 10 3-5h6" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    </g>
+    <path d="M32 7 53 19v22L32 53 11 41V19Z" fill="none" stroke="#fff" strokeOpacity=".3" strokeWidth="1.6" />
+  </svg>
+);
+
 import {
   AlertDialog,
   AlertDialogAction,
@@ -163,87 +182,64 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
       />
       <aside
         className={cn(
-          "fixed left-0 top-0 z-40 flex h-screen w-[280px] flex-shrink-0 flex-col bg-white/30 backdrop-blur-xl p-3 transition-transform lg:static lg:h-screen lg:translate-x-0",
+          "app-sidebar fixed left-0 top-0 z-40 flex h-screen w-[280px] flex-shrink-0 flex-col p-3 transition-transform lg:static lg:h-screen lg:translate-x-0",
           isOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
-        <div className="border-b border-[#F0F0F0] pb-3">
-          <div className="flex items-center gap-3">
-            <img src="/favicon.svg" alt="Logo" className="h-10 w-10 rounded-lg" />
-            <div style={{ fontFamily: sessionTitleFont }}>
-              <p className="text-base font-semibold text-[#1A1A1A]">sentinel AI 智能体</p>
-              <p className="text-xs text-[#999999]">Powered by AI</p>
+        <div className="sentinel-brand border-b border-white/10 pb-3">
+          <div className="flex items-center gap-2">
+            <div className="sentinel-brand__icon h-10 w-10 shrink-0">
+              <SentinelMark />
             </div>
+            <div className="sentinel-wordmark" aria-label="sentinel">sentinel</div>
           </div>
         </div>
-        <div className="py-3 space-y-4">
-          <div className="relative overflow-hidden rounded-2xl border border-[#E6EEF6] bg-gradient-to-br from-[#F0F9FF] via-white to-[#FEF3C7] p-3 shadow-[0_14px_30px_rgba(15,23,42,0.08)]">
-            <span
-              aria-hidden="true"
-              className="absolute -right-10 -top-10 h-24 w-24 rounded-full bg-[#BAE6FD]/70 blur-2xl"
-            />
-            <span
-              aria-hidden="true"
-              className="absolute -left-12 -bottom-10 h-28 w-28 rounded-full bg-[#FDE68A]/70 blur-2xl"
-            />
-            <div className="relative">
-              <div className="flex items-center justify-between px-1">
-                <span className="text-[11px] font-semibold text-[#94A3B8]">快速开始</span>
-                <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-semibold text-[#2563EB]">
-                  新内容
-                </span>
-              </div>
+        <nav className="sentinel-sidebar-nav mt-3 flex-1 overflow-y-auto sidebar-scroll">
+          <div className="sentinel-nav-group">
+            <button
+              type="button"
+              className="sentinel-nav-item sentinel-nav-item--active"
+              onClick={() => {
+                createSession().catch(() => null);
+                navigate("/chat");
+                onClose();
+              }}
+            >
+              <Plus className="h-4 w-4" />
+              <span>新建对话</span>
+            </button>
+          </div>
+          <div className="sentinel-nav-group">
+            <button type="button" className="sentinel-nav-item" onClick={() => navigate("/chat")}>
+              <BookOpen className="h-4 w-4" />
+              <span>知识库</span>
+            </button>
+          </div>
+          <div className="sentinel-nav-group">
+            {user?.role === "admin" ? (
               <button
                 type="button"
-                className="mt-2 flex w-full items-center gap-3 rounded-2xl bg-white/90 px-4 py-3 text-left shadow-[0_10px_20px_rgba(15,23,42,0.08)] transition-all hover:-translate-y-[1px] hover:shadow-[0_16px_30px_rgba(15,23,42,0.12)]"
+                className="sentinel-nav-item"
                 onClick={() => {
-                  createSession().catch(() => null);
-                  navigate("/chat");
+                  navigate("/admin");
                   onClose();
                 }}
               >
-                <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-[#60A5FA] to-[#2563EB] text-white shadow-[0_6px_14px_rgba(37,99,235,0.3)]">
-                  <Plus className="h-4 w-4" />
-                </span>
-                <span className="flex-1">
-                  <span className="block text-sm font-semibold text-[#1F2937]">新建对话</span>
-                  <span className="block text-xs text-[#94A3B8]">从空白开始</span>
-                </span>
+                <Settings className="h-4 w-4" />
+                <span>后台管理</span>
               </button>
-              {user?.role === "admin" ? (
-                <button
-                  type="button"
-                  className="mt-2 inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/70 px-3 py-1.5 text-xs font-semibold text-[#1D4ED8] transition-colors hover:bg-white"
-                  onClick={() => {
-                    window.open("/admin", "_blank");
-                    onClose();
-                  }}
-                >
-                  <Settings className="h-3.5 w-3.5" />
-                  管理后台
-                </button>
-              ) : null}
-            </div>
+            ) : null}
+            <label className="sentinel-nav-search">
+              <Search className="h-4 w-4 shrink-0" />
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="搜索对话…"
+                aria-label="搜索对话"
+              />
+            </label>
           </div>
-          <div className="rounded-2xl border border-[#E6EEF6] bg-white p-3 shadow-[0_12px_26px_rgba(15,23,42,0.06)]">
-            <div className="flex items-center justify-between px-1">
-              <span className="text-[11px] font-semibold text-[#94A3B8]">搜索对话</span>
-              <span className="text-[10px] text-[#CBD5F5]">Ctrl / Cmd + K</span>
-            </div>
-            <div className="mt-2">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#9CA3AF]" />
-                <input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="搜索对话..."
-                  className="h-10 w-full rounded-xl border border-[#E5E7EB] bg-[#F8FAFC] pl-9 pr-3 text-sm text-[#1F2937] placeholder:text-[#9CA3AF] focus:border-[#93C5FD] focus:outline-none transition-colors"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-        <div className="relative flex-1 min-h-0">
+        <div className="relative min-h-0 flex-1">
           <div className="h-full overflow-y-auto sidebar-scroll">
             {sessions.length === 0 && (!sessionsLoaded || isLoading) ? (
               <div
@@ -273,8 +269,8 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                         className={cn(
                           "group my-[1px] flex min-h-[40px] cursor-pointer items-center justify-between gap-2 rounded-lg px-3 py-2 text-[14px] leading-[22px] transition-colors duration-200",
                           currentSessionId === session.id
-                            ? "bg-[#DBEAFE] text-[#2563EB]"
-                            : "text-[#333333] hover:bg-[#F5F5F5]"
+                            ? "bg-cyan-400/10 text-cyan-300"
+                            : "text-slate-400 hover:bg-white/[0.06]"
                         )}
                         role="button"
                         tabIndex={0}
@@ -314,7 +310,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                             onBlur={() => {
                               commitRename().catch(() => null);
                             }}
-                            className="h-6 flex-1 rounded-md border border-[#E5E5E5] bg-white px-2 text-[14px] leading-[22px] text-[#333333] focus:border-[#2563EB] focus:outline-none"
+                            className="h-6 flex-1 rounded-md border border-cyan-400/30 bg-[#091224] px-2 text-[14px] leading-[22px] text-slate-100 focus:border-cyan-300 focus:outline-none"
                           />
                         ) : (
                           <span className="min-w-0 flex-1 truncate font-normal">
@@ -339,14 +335,14 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                           </DropdownMenuTrigger>
                           <DropdownMenuContent
                             align="start"
-                            className="min-w-[120px] rounded-lg border-0 bg-white p-0 py-1 shadow-[0_4px_16px_rgba(0,0,0,0.12)]"
+                            className="min-w-[120px] rounded-lg border border-white/10 bg-[#091224] p-0 py-1 shadow-xl"
                           >
                             <DropdownMenuItem
                               onClick={(event) => {
                                 event.stopPropagation();
                                 startRename(session.id, session.title || "新对话");
                               }}
-                              className="px-4 py-2 text-[14px] text-[#333333] focus:bg-[#F5F5F5] focus:text-[#333333] data-[highlighted]:bg-[#F5F5F5] data-[highlighted]:text-[#333333]"
+                              className="px-4 py-2 text-[14px] text-slate-300 focus:bg-white/[0.06] focus:text-slate-100 data-[highlighted]:bg-white/[0.06] data-[highlighted]:text-slate-100"
                             >
                               <Pencil className="mr-2 h-4 w-4" />
                               重命名
@@ -359,7 +355,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                                   title: session.title || "新对话"
                                 });
                               }}
-                              className="px-4 py-2 text-[14px] text-[#FF4D4F] focus:bg-[#F5F5F5] focus:text-[#FF4D4F] data-[highlighted]:bg-[#F5F5F5] data-[highlighted]:text-[#FF4D4F]"
+                              className="px-4 py-2 text-[14px] text-rose-300 focus:bg-rose-400/10 focus:text-rose-200 data-[highlighted]:bg-rose-400/10 data-[highlighted]:text-rose-200"
                             >
                               <Trash2 className="mr-2 h-4 w-4" />
                               删除
@@ -378,15 +374,16 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
             className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-5 bg-gradient-to-b from-transparent to-[#FAFAFA]"
           />
         </div>
+        </nav>
         <div className="mt-auto pt-3">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className="flex w-full items-center gap-2 rounded-lg p-2 text-left transition-colors hover:bg-[#F5F5F5] data-[state=open]:bg-[#EEEEEE]"
+                className="flex w-full items-center gap-2 rounded-lg border border-white/10 bg-white/[0.03] p-2 text-left transition-colors hover:bg-white/[0.07] data-[state=open]:bg-white/[0.08]"
                 aria-label="用户菜单"
               >
-                <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-[#3B82F6] text-white">
+                <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-cyan-400 to-blue-500 text-[#04070F]">
                   {showAvatar ? (
                     <img
                       src={avatarUrl}
@@ -398,13 +395,13 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                     <span className="text-sm font-medium">{avatarFallback}</span>
                   )}
                 </div>
-                <span className="flex-1 truncate text-sm font-medium text-[#1A1A1A]">
+                <span className="flex-1 truncate text-sm font-medium text-slate-200">
                   {(() => {
                     const fallback = user?.username || user?.userId || "用户";
                     return /^\d+$/.test(fallback) ? "用户" : fallback;
                   })()}
                 </span>
-                <MoreHorizontal className="h-4 w-4 text-[#999999]" />
+                <MoreHorizontal className="h-4 w-4 text-slate-500" />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" side="top" sideOffset={8} className="w-48">

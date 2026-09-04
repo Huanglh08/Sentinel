@@ -20,7 +20,7 @@ import {
   type LucideIcon
 } from "lucide-react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { toast } from "sonner";
 
 import { RelativeTime } from "@/components/RelativeTime";
@@ -57,8 +57,9 @@ const PAGE_SIZE_OPTIONS = [10, 20, 50];
 const ALL_VALUE = "__all__";
 
 const FILTER_SELECT_TRIGGER_CLASS =
-  "h-10 border-slate-200 text-sm focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 data-[state=open]:border-slate-200 data-[state=open]:ring-0";
-const FILTER_INPUT_CLASS = "h-10 border-slate-200 text-sm focus-visible:border-slate-200 focus-visible:ring-0 focus-visible:ring-offset-0";
+  "h-10 border-white/10 bg-white/[0.035] text-sm text-slate-200 focus:ring-0 focus:ring-offset-0 focus-visible:ring-0 focus-visible:ring-offset-0 data-[state=open]:border-cyan-400/50 data-[state=open]:ring-0";
+const FILTER_INPUT_CLASS =
+  "h-10 border-white/10 bg-white/[0.035] text-sm text-slate-200 placeholder:text-slate-500 focus-visible:border-cyan-400/50 focus-visible:ring-0 focus-visible:ring-offset-0";
 
 const pad2 = (value: number) => String(value).padStart(2, "0");
 
@@ -149,17 +150,17 @@ const operationBadgeClass = (operationType?: string | null) => {
   switch (operationType) {
     case "CREATE":
     case "ENABLE":
-      return "border-[#b7eb8f] bg-[#f6ffed] text-[#52C41A]";
+      return "border-emerald-400/30 bg-emerald-400/10 text-emerald-300";
     case "UPDATE":
-      return "border-[#91d5ff] bg-[#e6f7ff] text-[#1890FF]";
+      return "border-cyan-400/30 bg-cyan-400/10 text-cyan-300";
     case "DELETE":
-      return "border-[#ffa39e] bg-[#fff1f0] text-[#F5222D]";
+      return "border-red-400/30 bg-red-400/10 text-red-300";
     case "DISABLE":
-      return "border-[#d9d9d9] bg-[#fafafa] text-[#8c8c8c]";
+      return "border-slate-400/30 bg-slate-400/10 text-slate-300";
     case "RUN":
-      return "border-[#ffd591] bg-[#fff7e6] text-[#FA8C16]";
+      return "border-amber-400/30 bg-amber-400/10 text-amber-300";
     default:
-      return "border-slate-200 bg-slate-50 text-slate-600";
+      return "border-white/10 bg-white/[0.06] text-slate-300";
   }
 };
 
@@ -377,7 +378,7 @@ function JsonCodeBlock({ value }: { value?: string | null }) {
       <div className="max-h-[440px] overflow-auto">
         <SyntaxHighlighter
           language="json"
-          style={oneLight}
+          style={vscDarkPlus}
           PreTag="div"
           showLineNumbers
           customStyle={{
@@ -504,7 +505,7 @@ export function BizChangeLogPage() {
         </div>
       </div>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-3">
+      <div className="rounded-xl border border-white/10 bg-white/[0.035] p-3">
         <div className="flex flex-col gap-2 lg:flex-row lg:flex-wrap lg:items-center">
           <Select
             value={filters.bizType || ALL_VALUE}
@@ -562,21 +563,21 @@ export function BizChangeLogPage() {
             onKeyDown={(event) => event.key === "Enter" && handleSearch()}
             placeholder="操作人"
           />
-          <div className="flex h-10 items-center rounded-md border border-slate-200 bg-white px-2 transition-colors focus-within:border-slate-300">
+          <div className="flex h-10 items-center rounded-md border border-white/10 bg-white/[0.035] px-2 transition-colors focus-within:border-cyan-400/50">
             <input
               type="date"
               value={filters.beginTime}
               max={filters.endTime || undefined}
               onChange={(event) => setFilters((prev) => ({ ...prev, beginTime: event.target.value }))}
-              className="w-[116px] bg-transparent px-1 text-sm text-slate-600 focus:outline-none"
+              className="w-[116px] bg-transparent px-1 text-sm text-slate-200 focus:outline-none"
             />
-            <span className="px-0.5 text-slate-300">~</span>
+            <span className="px-0.5 text-slate-500">~</span>
             <input
               type="date"
               value={filters.endTime}
               min={filters.beginTime || undefined}
               onChange={(event) => setFilters((prev) => ({ ...prev, endTime: event.target.value }))}
-              className="w-[116px] bg-transparent px-1 text-sm text-slate-600 focus:outline-none"
+              className="w-[116px] bg-transparent px-1 text-sm text-slate-200 focus:outline-none"
             />
           </div>
           <div className="flex items-center gap-2">
@@ -608,14 +609,14 @@ export function BizChangeLogPage() {
                   <TableHead className="w-[140px]">操作人</TableHead>
                   <TableHead className="w-[90px]">结果</TableHead>
                   <TableHead className="w-[150px]">时间</TableHead>
-                  <TableHead className="sticky right-0 z-20 w-[168px] bg-[#F9FAFB] text-left shadow-[-1px_0_0_rgba(226,232,240,1)]">
+                  <TableHead className="sticky right-0 z-20 w-[168px] bg-[#091224] text-left shadow-[-1px_0_0_rgba(120,170,220,0.16)]">
                     详情
                   </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {records.map((item) => (
-                  <TableRow key={item.id} className="group text-[13px] hover:!bg-slate-50">
+                  <TableRow key={item.id} className="group text-[13px] hover:!bg-cyan-400/[0.08]">
                     <TableCell>
                       <BizTypeCell bizType={item.bizType} />
                     </TableCell>
@@ -642,7 +643,7 @@ export function BizChangeLogPage() {
                     <TableCell>
                       <RelativeTime value={item.createTime} />
                     </TableCell>
-                    <TableCell className="sticky right-0 z-10 bg-white shadow-[-1px_0_0_rgba(226,232,240,1)] group-hover:bg-slate-50">
+                    <TableCell className="sticky right-0 z-10 bg-[#091224] shadow-[-1px_0_0_rgba(120,170,220,0.16)] group-hover:bg-[#102342]">
                       <div className="flex items-center gap-2">
                         <Button
                           size="sm"
@@ -749,7 +750,7 @@ export function BizChangeLogPage() {
                   <span className="min-w-0 break-words">{detail.errorMessage || "操作失败"}</span>
                 </div>
               ) : null}
-              <div className="inline-flex items-center gap-1 rounded-lg bg-slate-100 p-1">
+              <div className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-white/[0.035] p-1">
                 {[
                   { key: "diff", label: "差异" },
                   { key: "before", label: "变更前" },

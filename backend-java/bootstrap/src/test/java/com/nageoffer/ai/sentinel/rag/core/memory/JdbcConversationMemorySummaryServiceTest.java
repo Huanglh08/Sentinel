@@ -18,13 +18,8 @@
 package com.nageoffer.ai.sentinel.rag.core.memory;
 
 import com.nageoffer.ai.sentinel.framework.convention.ChatMessage;
-import com.nageoffer.ai.sentinel.framework.convention.ChatRequest;
-import com.nageoffer.ai.sentinel.infra.chat.LLMService;
-import com.nageoffer.ai.sentinel.infra.enums.Tier;
+import com.nageoffer.ai.sentinel.rag.client.PythonAgentClient;
 import com.nageoffer.ai.sentinel.rag.config.MemoryProperties;
-import com.nageoffer.ai.sentinel.rag.core.prompt.AgentPromptResolver;
-import com.nageoffer.ai.sentinel.rag.core.prompt.AgentPromptSlot;
-import com.nageoffer.ai.sentinel.rag.core.prompt.PromptTemplateLoader;
 import com.nageoffer.ai.sentinel.rag.dao.entity.ConversationMessageDO;
 import com.nageoffer.ai.sentinel.rag.dao.entity.ConversationSummaryDO;
 import com.nageoffer.ai.sentinel.rag.service.ConversationGroupService;
@@ -43,9 +38,7 @@ import java.util.List;
 import java.util.concurrent.Executor;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyMap;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -64,13 +57,7 @@ class JdbcConversationMemorySummaryServiceTest {
     private ConversationMessageService conversationMessageService;
 
     @Mock
-    private LLMService llmService;
-
-    @Mock
-    private PromptTemplateLoader promptTemplateLoader;
-
-    @Mock
-    private AgentPromptResolver agentPromptResolver;
+    private PythonAgentClient pythonAgentClient;
 
     @Mock
     private RedissonClient redissonClient;
@@ -93,9 +80,7 @@ class JdbcConversationMemorySummaryServiceTest {
                 conversationGroupService,
                 conversationMessageService,
                 memoryProperties,
-                llmService,
-                promptTemplateLoader,
-                agentPromptResolver,
+                pythonAgentClient,
                 redissonClient,
                 directExecutor
         );
@@ -103,9 +88,6 @@ class JdbcConversationMemorySummaryServiceTest {
         when(redissonClient.getLock(anyString())).thenReturn(lock);
         when(lock.tryLock()).thenReturn(true);
         when(lock.isHeldByCurrentThread()).thenReturn(true);
-        // promptTemplateLoader 仅 decorateIfNeeded 路径使用，当前用例不覆盖该路径；
-        // 安全桩防止将来加用例时静默取到 null
-        when(promptTemplateLoader.renderSection(anyString(), anyString(), anyMap())).thenReturn("wrapped summary");
     }
 
     @Test
@@ -142,7 +124,7 @@ class JdbcConversationMemorySummaryServiceTest {
 
         service.compressIfNeeded(CONVERSATION_ID, USER_ID, ChatMessage.assistant("answer"));
 
-        verifyNoInteractions(llmService, conversationMessageService);
+        verifyNoInteractions(pythonAgentClient, conversationMessageService);
     }
 
     @Test
@@ -172,8 +154,7 @@ class JdbcConversationMemorySummaryServiceTest {
     }
 
     private void stubSummaryGeneration() {
-        when(agentPromptResolver.render(eq(AgentPromptSlot.CONVERSATION_SUMMARY), anyMap())).thenReturn("summary prompt");
-        when(llmService.chat(any(ChatRequest.class), eq(Tier.FAST))).thenReturn("updated summary");
+        when(pythonAgentClient.summarize(anyList(), anyString())).thenReturn("updated summary");
     }
 
     private List<ConversationMessageDO> latestUserTurns() {

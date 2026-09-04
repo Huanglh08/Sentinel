@@ -1,8 +1,10 @@
 """基于 Java 端 EvalController 的意图识别评测。
 
-读取 seed-intent.jsonl,对每条 q 调用
-    GET http://localhost:9090/api/ragent/rag/eval?question=<q>
-拿到意图 Top-K 列表,与真值 intent_l2 比对,统计:
+读取 intent-seeds.jsonl,对每条 q 调用
+    GET http://localhost:9090/api/sentinel/rag/eval?question=<q>
+(需先登录网关拿 token,裸 token 不带 Bearer 前缀)
+拿到意图 Top-K 列表(雪花节点 id,经 intent-tree/trees 映射为 intentCode),
+与真值 intent_l2 比对,统计:
 
 - Top-1 accuracy:模型给的第一名 intent 命中真值的比例
 - Top-3 accuracy:模型给的前三名 intent 包含真值的比例
@@ -31,6 +33,11 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+
+# 支持脚本方式运行: python eval\intent_eval.py（把 agent-python 目录加入 sys.path）
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 
 # ---------- 数据模型 ----------
@@ -96,6 +103,61 @@ def load_seeds(path: Path) -> list[SeedCase]:
     return out
 
 
+# ---------- 鉴权与意图树映射 ----------
+
+
+async def login(client: httpx.AsyncClient, api_base: str, username: str, password: str) -> str:
+    """登录 Java 网关获取 token(裸 token,不带 Bearer 前缀)。"""
+    resp = await client.post(
+        f"{api_base.rstrip('/')}/api/sentinel/auth/login",
+        json={"username": username, "password": password},
+        timeout=15.0,
+    )
+    resp.raise_for_status()
+    payload = resp.json()
+    if str(payload.get("code")) != "0":
+        raise RuntimeError(f"登录失败:code={payload.get('code')}, message={payload.get('message')}")
+    token = (payload.get("data") or {}).get("token")
+    if not token:
+        raise RuntimeError("登录响应缺少 data.token")
+    return str(token)
+
+
+async def fetch_intent_code_map(
+    client: httpx.AsyncClient,
+    api_base: str,
+    username: str,
+    password: str,
+) -> tuple[str, dict[str, str]]:
+    """登录并拉取意图树,构建 雪花节点id → intentCode 映射。"""
+    token = await login(client, api_base, username, password)
+    resp = await client.get(
+        f"{api_base.rstrip('/')}/api/sentinel/intent-tree/trees",
+        headers={"Authorization": token},
+        timeout=30.0,
+    )
+    resp.raise_for_status()
+    payload = resp.json()
+    if str(payload.get("code")) != "0":
+        raise RuntimeError(f"拉取意图树失败:code={payload.get('code')}, message={payload.get('message')}")
+    roots = payload.get("data") or []
+
+    mapping: dict[str, str] = {}
+
+    def _walk(nodes: Any) -> None:
+        for n in nodes or []:
+            nid = n.get("id")
+            code = n.get("intentCode")
+            if nid is not None and code:
+                mapping[str(nid)] = str(code)
+            _walk(n.get("children"))
+
+    _walk(roots)
+    if not mapping:
+        raise RuntimeError("意图树为空(未拉取到任何节点),请先导入风控意图树")
+    return token, mapping
+
+
 # ---------- 单条评测 ----------
 
 
@@ -104,6 +166,7 @@ async def _eval_one(
     base_url: str,
     case: SeedCase,
     timeout: float,
+    code_map: dict[str, str],
 ) -> CaseResult:
     url = f"{base_url.rstrip('/')}?question={urllib.parse.quote(case.q)}"
     t0 = time.perf_counter()
@@ -139,12 +202,16 @@ async def _eval_one(
             error=f"exception: {e!s}",
         )
 
-    # 兼容字段(后端用 camelCase)
-    intent_leaf_ids = data.get("intentLeafIds") or data.get("intent_leaf_ids") or []
-    sub_intents = data.get("subIntents") or data.get("sub_intents") or []
+    # 兼容字段(后端响应为 {code, message, data} 包装,camelCase)
+    payload = data if isinstance(data, dict) else {}
+    inner = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+    intent_leaf_ids = inner.get("intentLeafIds") or inner.get("intent_leaf_ids") or []
+    sub_intents = inner.get("subIntents") or inner.get("sub_intents") or []
 
-    top1 = intent_leaf_ids[0] if intent_leaf_ids else ""
-    top3 = list(intent_leaf_ids[:3])
+    # 雪花节点 id → intentCode,再与种子真值(intentCode)比对
+    predicted_codes = [code_map.get(str(i), str(i)) for i in intent_leaf_ids]
+    top1 = predicted_codes[0] if predicted_codes else ""
+    top3 = list(predicted_codes[:3])
 
     return CaseResult(
         question=case.q,
@@ -168,14 +235,25 @@ async def _run(
     seeds: list[SeedCase],
     concurrency: int,
     timeout: float,
+    username: str,
+    password: str,
 ) -> EvalSummary:
     sem = asyncio.Semaphore(concurrency)
     results: list[CaseResult] = []
 
     async with httpx.AsyncClient() as client:
+        # 登录网关并构建 雪花id → intentCode 映射
+        api_base = base_url.split("/api/")[0]
+        token, code_map = await fetch_intent_code_map(client, api_base, username, password)
+        print(
+            f"[intent_eval] 登录成功,意图树映射 {len(code_map)} 个节点",
+            file=sys.stderr,
+        )
+        client.headers["Authorization"] = token
+
         async def _one(c: SeedCase) -> CaseResult:
             async with sem:
-                return await _eval_one(client, base_url, c, timeout)
+                return await _eval_one(client, base_url, c, timeout, code_map)
 
         tasks = [asyncio.create_task(_one(c)) for c in seeds]
         for i, coro in enumerate(asyncio.as_completed(tasks), 1):
@@ -217,27 +295,30 @@ async def _run(
 
 def main() -> int:
     eval_dir = Path(__file__).resolve().parent
-    default_seed = eval_dir / "data" / "seed-intent.jsonl"
+    repo_root = Path(__file__).resolve().parents[2]
+    default_seed = repo_root / "evaluation" / "seeds" / "intent-seeds.jsonl"
     default_output = eval_dir / "reports"
 
     parser = argparse.ArgumentParser(description="基于 Java EvalController 的意图评测")
     parser.add_argument(
         "--eval-url",
-        default="http://localhost:9090/api/ragent/rag/eval",
-        help="Java 端 EvalController 的 URL",
+        default="http://localhost:9090/api/sentinel/rag/eval",
+        help="Java 端 EvalController 的 URL(经网关,前缀 /api/sentinel)",
     )
     parser.add_argument("--seed", default=str(default_seed), help="seed jsonl 路径")
     parser.add_argument("--output", default=str(default_output), help="报告输出目录")
     parser.add_argument("--concurrency", type=int, default=4, help="并发请求数")
     parser.add_argument("--timeout", type=float, default=120.0, help="单条超时秒数")
     parser.add_argument("--name", default="intent", help="报告名前缀")
+    parser.add_argument("--username", default="admin", help="网关登录用户名")
+    parser.add_argument("--password", default="admin", help="网关登录密码")
     args = parser.parse_args()
 
     seeds = load_seeds(Path(args.seed))
     print(f"[intent_eval] 加载 {len(seeds)} 条 seed from {args.seed}", file=sys.stderr)
 
     summary = asyncio.run(
-        _run(args.eval_url, seeds, args.concurrency, args.timeout)
+        _run(args.eval_url, seeds, args.concurrency, args.timeout, args.username, args.password)
     )
 
     # 写 JSON

@@ -155,6 +155,10 @@ class RoutingEmbeddingService:
         result = self.embed_batch([text], model_id)
         return result.vectors[0]
 
+    def default_model_id(self) -> str:
+        """默认候选 id——缓存层用来区分主模型与降级产出。"""
+        return self._config.embedding_default_model
+
     def embed_batch(
         self,
         texts: list[str],

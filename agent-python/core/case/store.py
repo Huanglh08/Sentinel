@@ -16,19 +16,27 @@ from core.case.types import (
     ACTION_STATUS_EXECUTED,
     APPROVAL_STATUS_PENDING,
     AUDIT_OPERATION_CLOSE,
+    AUDIT_OPERATION_KB_DISTILL,
     CASE_STATUS_CLOSED,
     CASE_STATUS_INVESTIGATING,
     CASE_STATUS_REPORTED,
+    RULE_STATUS_APPROVED,
+    RULE_STATUS_PENDING,
+    RULE_STATUS_REJECTED,
     EvidenceStep,
 )
 from core.db import get_pool
+from core.guard.indirect import check_kb_distillation
 from core.memory.store import next_message_id
 
 logger = logging.getLogger(__name__)
 
+# 知识沉淀最大入库长度（与 t_case_kb_distillation.distillation VARCHAR(2048) 对齐）
+KB_DISTILLATION_MAX_CHARS = 2048
+
 _CASE_COLS = (
     "id, case_no, title, status, priority, severity, confidence, subject_type, subject_id, "
-    "clue_summary, raw_input, triage, report, user_id, source, tta_ms, ttr_ms, "
+    "clue_summary, raw_input, triage, report, user_id, source, fingerprint, tta_ms, ttr_ms, "
     "create_by, create_time, update_time"
 )
 
@@ -43,6 +51,8 @@ class CaseStore:
         self._mem_approvals: dict[str, dict] = {}
         self._mem_actions: dict[str, dict] = {}
         self._mem_audits: dict[str, dict] = {}
+        self._mem_kb_distillations: dict[str, dict] = {}  # key=case_id（唯一约束）
+        self._mem_rule_candidates: dict[str, dict] = {}  # Phase 4 Rule Miner 候选规则
         try:
             get_pool()
         except Exception as e:  # noqa: BLE001
@@ -67,6 +77,7 @@ class CaseStore:
         triage: dict,
         user_id: str = "",
         source: str = "MANUAL",
+        fingerprint: str = "",
     ) -> dict:
         case_id = next_message_id()
         case_no = f"CASE-{self._now().strftime('%Y%m%d')}-{case_id[-6:]}"
@@ -76,7 +87,7 @@ class CaseStore:
                 with get_pool().connection() as conn, conn.cursor() as cur:
                     cur.execute(
                         f"INSERT INTO t_case ({_CASE_COLS}) VALUES ("
-                        "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                        "%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                         (
                             case_id,
                             case_no,
@@ -93,6 +104,7 @@ class CaseStore:
                             None,
                             user_id,
                             source,
+                            fingerprint,
                             None,
                             None,
                             user_id,
@@ -119,6 +131,7 @@ class CaseStore:
             "report": None,
             "user_id": user_id,
             "source": source,
+            "fingerprint": fingerprint,
             "tta_ms": None,
             "ttr_ms": None,
             "create_time": self._now().isoformat(timespec="seconds"),
@@ -126,6 +139,26 @@ class CaseStore:
         self._mem_cases[case_id] = record
         self._mem_evidence[case_id] = []
         return record
+
+    def case_exists_by_fingerprint(self, fingerprint: str) -> bool:
+        """巡检幂等（Phase 4）：同指纹线索是否已建案。
+
+        指纹 = sha256(source + clue)，由 patrol 层计算；DB 侧另有部分唯一索引
+        uk_case_fingerprint 兜底防并发重复建案。
+        """
+        if not fingerprint:
+            return False
+        if self.enabled:
+            try:
+                with get_pool().connection() as conn, conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT 1 FROM t_case WHERE fingerprint=%s AND deleted=0 LIMIT 1",
+                        (fingerprint,),
+                    )
+                    return cur.fetchone() is not None
+            except Exception:  # noqa: BLE001
+                logger.exception("[case] 线索指纹查重失败 fp=%s", fingerprint)
+        return any(c.get("fingerprint") == fingerprint for c in self._mem_cases.values())
 
     def finish_case(
         self,
@@ -615,3 +648,371 @@ class CaseStore:
                 detail=f"案件归档：{case.get('case_no', '')}",
             )
         return {"case": case, "closed": closed}
+
+    # ------------------------------------------------------------------
+    # 知识库飞轮（Phase 3：报告经验回写候选池，后续 Rule Miner 消费）
+    # ------------------------------------------------------------------
+    _KB_COLS = (
+        "id, case_id, case_no, title, conclusion, confidence, "
+        "distillation, operator, create_time"
+    )
+
+    @staticmethod
+    def _parse_report(case: dict) -> dict:
+        report = case.get("report")
+        if isinstance(report, str):
+            try:
+                report = json.loads(report)
+            except Exception:  # noqa: BLE001
+                report = {}
+        return report if isinstance(report, dict) else {}
+
+    def distill_knowledge(self, case_id: str, operator: str = "") -> dict | None:
+        """案件归档时把报告 knowledge_distillation 回写知识库候选池（幂等）。
+
+        - 无经验可沉淀（字段为空）返回 None；
+        - 同一案件重复归档不重复沉淀（case_id 唯一约束）；
+        - 落库成功后写 KB_DISTILL 审计留痕。
+
+        写入护栏（ASI04 知识库/记忆投毒）：沉淀文本命中注入模式时**拒绝写入**。
+        知识沉淀会经 Rule Miner 拼进 LLM prompt 参与规则挖掘并回注分诊提示词，
+        影响面覆盖后续所有案件，故此处口径比报告消毒更严格——只阻断不消毒，
+        避免占位符替换产出残缺经验污染规则挖掘输入。
+        """
+        case = self.get_case(case_id)
+        if case is None:
+            return None
+        report = self._parse_report(case)
+        distillation = str(report.get("knowledge_distillation", "")).strip()
+        if not distillation:
+            return None
+
+        # 先截断再校验：入库内容是截断后的，护栏必须覆盖真正落库的文本
+        distillation = distillation[:KB_DISTILLATION_MAX_CHARS]
+        safe, inj_hits = check_kb_distillation(distillation)
+        if not safe:
+            logger.warning(
+                "[case] 知识沉淀写入被护栏拦截 case=%s 命中注入模式=%s（内容未入库，见案件审计）",
+                case.get("case_no", ""), inj_hits,
+            )
+            self.record_audit(
+                case_id=case_id,
+                operation=AUDIT_OPERATION_KB_DISTILL,
+                target=case_id,
+                operator=operator,
+                detail=f"知识飞轮写入被拦截：命中注入模式 {','.join(inj_hits)}，内容未入库",
+            )
+            return {"distilled": False, "blocked": True, "injection_hits": inj_hits, "record": None}
+
+        now = self._now()
+        rec = {
+            "id": next_message_id(),
+            "case_id": case_id,
+            "case_no": case.get("case_no", "") or "",
+            "title": str(case.get("title", ""))[:128],
+            "conclusion": str(report.get("conclusion", ""))[:16],
+            "confidence": report.get("confidence"),
+            "distillation": distillation[:2048],
+            "operator": operator,
+            "create_time": now.isoformat(timespec="seconds"),
+        }
+        inserted = True
+        if self.enabled:
+            try:
+                with get_pool().connection() as conn, conn.cursor() as cur:
+                    cur.execute(
+                        "INSERT INTO t_case_kb_distillation (id, case_id, case_no, title, "
+                        "conclusion, confidence, distillation, operator, create_time) "
+                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (case_id) DO NOTHING",
+                        (
+                            rec["id"], rec["case_id"], rec["case_no"], rec["title"],
+                            rec["conclusion"], rec["confidence"], rec["distillation"],
+                            rec["operator"], now,
+                        ),
+                    )
+                    inserted = cur.rowcount > 0
+            except Exception:  # noqa: BLE001
+                logger.exception("[case] 知识沉淀回写失败 case=%s（降级内存）", case_id)
+                self.enabled = False
+        elif case_id in self._mem_kb_distillations:
+            inserted = False  # 内存模式幂等：该案件已沉淀过
+        if inserted:
+            # 内存模式以 case_id 为 key 天然幂等；重复回写不覆盖首条
+            self._mem_kb_distillations.setdefault(case_id, dict(rec))
+            self.record_audit(
+                case_id=case_id,
+                operation=AUDIT_OPERATION_KB_DISTILL,
+                target=case_id,
+                operator=operator,
+                detail=f"知识库飞轮回写：{case.get('case_no', '')} -> 候选池",
+            )
+            logger.info("[case] 知识飞轮回写成功 case=%s", case.get("case_no", ""))
+        else:
+            logger.info("[case] 知识沉淀已存在，跳过 case=%s", case_id)
+        return {"distilled": inserted, "record": self._mem_kb_distillations.get(case_id, dict(rec))}
+
+    def list_kb_distillations(self, conclusion: str = "", limit: int = 100) -> list[dict]:
+        """知识库候选池列表（管理端/Rule Miner 消费），按创建时间倒序。"""
+        if self.enabled:
+            try:
+                with get_pool().connection() as conn, conn.cursor() as cur:
+                    sql = f"SELECT {self._KB_COLS} FROM t_case_kb_distillation WHERE 1=1"
+                    params: list = []
+                    if conclusion:
+                        sql += " AND conclusion=%s"
+                        params.append(conclusion)
+                    sql += " ORDER BY create_time DESC LIMIT %s"
+                    params.append(limit)
+                    cur.execute(sql, tuple(params))
+                    return [dict(zip(self._KB_COLS.split(", "), r)) for r in cur.fetchall()]
+            except Exception:  # noqa: BLE001
+                logger.exception("[case] 知识沉淀列表查询失败")
+        rows = sorted(
+            self._mem_kb_distillations.values(),
+            key=lambda d: d.get("create_time", ""),
+            reverse=True,
+        )
+        if conclusion:
+            rows = [d for d in rows if d.get("conclusion") == conclusion]
+        return [dict(d) for d in rows[:limit]]
+
+    # ------------------------------------------------------------------
+    # 规则候选（Phase 4 Rule Miner）：蒸馏经验 -> 结构化候选规则 -> HITL 审核
+    # ------------------------------------------------------------------
+    _RULE_COLS = (
+        "id, rule_name, condition_text, action_suggestion, severity, confidence, "
+        "condition_hash, status, source_case_ids, source_distill_ids, "
+        "validation_hit_rate, validation_sample, validation_note, "
+        "hit_count, operator, review_operator, review_opinion, create_time, update_time"
+    )
+
+    def create_rule_candidates(self, rows: list[dict], operator: str = "") -> tuple[list[dict], int]:
+        """批量落候选规则（PENDING）。
+
+        - condition_hash 唯一约束去重（护栏：重复经验不重复产规则）；
+        - 返回 (实际新建记录列表, 因重复被跳过的数量)。
+        """
+        created: list[dict] = []
+        rows_sql: list[tuple] = []
+        now = self._now()
+        for it in rows:
+            rid = next_message_id()
+            rec = {
+                "id": rid,
+                "rule_name": str(it.get("rule_name", ""))[:128],
+                "condition_text": str(it.get("condition_text", ""))[:1024],
+                "action_suggestion": str(it.get("action_suggestion", ""))[:512],
+                "severity": str(it.get("severity", ""))[:16],
+                "confidence": it.get("confidence"),
+                "condition_hash": str(it.get("condition_hash", ""))[:64],
+                "status": RULE_STATUS_PENDING,
+                "source_case_ids": str(it.get("source_case_ids", ""))[:512],
+                "source_distill_ids": str(it.get("source_distill_ids", ""))[:512],
+                "validation_hit_rate": None,
+                "validation_sample": 0,
+                "validation_note": "",
+                "hit_count": 0,
+                "operator": operator,
+                "review_operator": "",
+                "review_opinion": "",
+                "create_time": now.isoformat(timespec="seconds"),
+                "update_time": now.isoformat(timespec="seconds"),
+            }
+            if not rec["condition_hash"] or not rec["condition_text"]:
+                continue
+            created.append(rec)
+            rows_sql.append(
+                (
+                    rec["id"], rec["rule_name"], rec["condition_text"], rec["action_suggestion"],
+                    rec["severity"], rec["confidence"], rec["condition_hash"], rec["status"],
+                    rec["source_case_ids"], rec["source_distill_ids"], rec["operator"], now, now,
+                )
+            )
+        inserted = 0
+        skipped = 0
+        final: list[dict] = []
+        if rows_sql and self.enabled:
+            insert_sql = (
+                "INSERT INTO t_case_rule_candidate (id, rule_name, condition_text, "
+                "action_suggestion, severity, confidence, condition_hash, status, "
+                "source_case_ids, source_distill_ids, operator, create_time, update_time) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+                "ON CONFLICT (condition_hash) DO NOTHING RETURNING id"
+            )
+            try:
+                with get_pool().connection() as conn, conn.cursor() as cur:
+                    inserted_ids: set[str] = set()
+                    for row in rows_sql:  # 每批 ≤10 条，逐条 RETURNING 语义最稳
+                        cur.execute(insert_sql, row)
+                        got = cur.fetchone()
+                        if got:
+                            inserted_ids.add(str(got[0]))
+                    inserted = len(inserted_ids)
+                    final = [r for r in created if r["id"] in inserted_ids]
+                    skipped = len(created) - inserted
+            except Exception:  # noqa: BLE001
+                logger.exception("[case] 候选规则写入失败（降级内存）")
+                self.enabled = False
+        if not self.enabled:
+            for rec in created:
+                existing = next(
+                    (r for r in self._mem_rule_candidates.values() if r["condition_hash"] == rec["condition_hash"]),
+                    None,
+                )
+                if existing is not None:
+                    skipped += 1
+                    continue
+                self._mem_rule_candidates[rec["id"]] = rec
+                final.append(dict(rec))
+        if final:
+            logger.info("[case] Rule Miner 候选规则落库 %d 条（重复跳过 %d）", len(final), skipped)
+        return final, skipped
+
+    def list_rule_candidates(self, status: str = "", limit: int = 100) -> list[dict]:
+        """候选规则列表（管理端/审核视角），按创建时间倒序。"""
+        if self.enabled:
+            try:
+                with get_pool().connection() as conn, conn.cursor() as cur:
+                    sql = f"SELECT {self._RULE_COLS} FROM t_case_rule_candidate WHERE 1=1"
+                    params: list = []
+                    if status:
+                        sql += " AND status=%s"
+                        params.append(status)
+                    sql += " ORDER BY create_time DESC LIMIT %s"
+                    params.append(limit)
+                    cur.execute(sql, tuple(params))
+                    return [dict(zip(self._RULE_COLS.split(", "), r)) for r in cur.fetchall()]
+            except Exception:  # noqa: BLE001
+                logger.exception("[case] 候选规则列表查询失败")
+        rows = sorted(
+            self._mem_rule_candidates.values(),
+            key=lambda r: r.get("create_time", ""),
+            reverse=True,
+        )
+        if status:
+            rows = [r for r in rows if r.get("status") == status]
+        return [dict(r) for r in rows[:limit]]
+
+    def get_rule_candidate(self, rule_id: str) -> dict | None:
+        if self.enabled:
+            try:
+                with get_pool().connection() as conn, conn.cursor() as cur:
+                    cur.execute(
+                        f"SELECT {self._RULE_COLS} FROM t_case_rule_candidate WHERE id=%s",
+                        (rule_id,),
+                    )
+                    row = cur.fetchone()
+                    return dict(zip(self._RULE_COLS.split(", "), row)) if row else None
+            except Exception:  # noqa: BLE001
+                logger.exception("[case] 候选规则查询失败: %s", rule_id)
+        return self._mem_rule_candidates.get(rule_id)
+
+    def review_rule_candidate(
+        self, rule_id: str, *, status: str, operator: str = "", opinion: str = ""
+    ) -> dict | None:
+        """候选规则 HITL 审核（APPROVED / REJECTED），first_time 幂等语义同 decide_approval。"""
+        if status not in (RULE_STATUS_APPROVED, RULE_STATUS_REJECTED):
+            raise ValueError(f"非法规则状态: {status}")
+        now = self._now()
+        if self.enabled:
+            try:
+                with get_pool().connection() as conn, conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE t_case_rule_candidate SET status=%s, review_operator=%s, "
+                        "review_opinion=%s, update_time=%s WHERE id=%s AND status=%s",
+                        (status, operator, opinion, now, rule_id, RULE_STATUS_PENDING),
+                    )
+                    first_time = cur.rowcount > 0
+                    cur.execute(
+                        f"SELECT {self._RULE_COLS} FROM t_case_rule_candidate WHERE id=%s",
+                        (rule_id,),
+                    )
+                    row = cur.fetchone()
+                    if not row:
+                        return None
+                    item = dict(zip(self._RULE_COLS.split(", "), row))
+                    item["first_time"] = first_time
+                    return item
+            except Exception:  # noqa: BLE001
+                logger.exception("[case] 候选规则审核失败: %s", rule_id)
+        rec = self._mem_rule_candidates.get(rule_id)
+        if rec is None:
+            return None
+        if rec.get("status") != RULE_STATUS_PENDING:
+            item = dict(rec)
+            item["first_time"] = False
+            return item
+        rec.update(
+            status=status,
+            review_operator=operator,
+            review_opinion=opinion,
+            update_time=now.isoformat(timespec="seconds"),
+        )
+        item = dict(rec)
+        item["first_time"] = True
+        return item
+
+    def update_rule_validation(
+        self, rule_id: str, *, hit_rate: float, sample: int, note: str = ""
+    ) -> dict | None:
+        """历史案件回放验证结果回写（Google 检测工程 Agent 的合成遥测验证环节，
+        Sentinel 对应物：规则在历史案件集上的命中率回放）。"""
+        if self.enabled:
+            try:
+                with get_pool().connection() as conn, conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE t_case_rule_candidate SET validation_hit_rate=%s, "
+                        "validation_sample=%s, validation_note=%s, update_time=%s WHERE id=%s",
+                        (hit_rate, sample, note[:512], self._now(), rule_id),
+                    )
+                    if cur.rowcount <= 0:
+                        return None
+            except Exception:  # noqa: BLE001
+                logger.exception("[case] 规则验证回写失败: %s", rule_id)
+        rec = self._mem_rule_candidates.get(rule_id)
+        if rec is None:
+            return None
+        rec.update(
+            validation_hit_rate=hit_rate,
+            validation_sample=sample,
+            validation_note=note[:512],
+            update_time=self._now().isoformat(timespec="seconds"),
+        )
+        return dict(rec)
+
+    def record_rule_hits(self, rule_ids: list[str]) -> None:
+        """规则被分诊引用时 hit_count +1（生命周期数据：后续淘汰策略消费）。"""
+        if not rule_ids:
+            return
+        if self.enabled:
+            try:
+                with get_pool().connection() as conn, conn.cursor() as cur:
+                    cur.executemany(
+                        "UPDATE t_case_rule_candidate SET hit_count=hit_count+1, "
+                        "update_time=%s WHERE id=%s",
+                        [(self._now(), rid) for rid in rule_ids],
+                    )
+            except Exception:  # noqa: BLE001
+                logger.exception("[case] 规则命中计数失败")
+        for rid in rule_ids:
+            rec = self._mem_rule_candidates.get(rid)
+            if rec is not None:
+                rec["hit_count"] = int(rec.get("hit_count") or 0) + 1
+
+    def list_rule_hints(self, limit: int = 5) -> list[dict]:
+        """分诊注入用：APPROVED 规则 top-N（confidence 优先、hit_count 次之）。"""
+        if self.enabled:
+            try:
+                with get_pool().connection() as conn, conn.cursor() as cur:
+                    cur.execute(
+                        f"SELECT {self._RULE_COLS} FROM t_case_rule_candidate "
+                        "WHERE status=%s ORDER BY confidence DESC, hit_count DESC, "
+                        "create_time DESC LIMIT %s",
+                        (RULE_STATUS_APPROVED, limit),
+                    )
+                    return [dict(zip(self._RULE_COLS.split(", "), r)) for r in cur.fetchall()]
+            except Exception:  # noqa: BLE001
+                logger.exception("[case] 规则提示查询失败")
+        rows = [r for r in self._mem_rule_candidates.values() if r.get("status") == RULE_STATUS_APPROVED]
+        rows.sort(key=lambda r: (float(r.get("confidence") or 0), int(r.get("hit_count") or 0)), reverse=True)
+        return [dict(r) for r in rows[:limit]]

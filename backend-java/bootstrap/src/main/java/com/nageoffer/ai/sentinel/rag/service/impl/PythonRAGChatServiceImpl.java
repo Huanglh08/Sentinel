@@ -130,8 +130,12 @@ public class PythonRAGChatServiceImpl implements RAGChatService {
                             String title = resolveTitle(actualConversationId, userId);
                             // sources 用于前端引用面板
                             List<SourceRef> sources = buildSourceRefs(completeData);
+                            // ttft_breakdown 五段归因透传（评测 /debug 用，前端忽略未知字段）
+                            Map<String, Object> ttftBreakdown =
+                                    (Map<String, Object>) completeData.get("ttft_breakdown");
                             sender.sendEvent(SSEEventType.FINISH.value(),
-                                    new CompletionPayload(messageId, title, sources, ChatMessage.MessageStatus.NORMAL));
+                                    new CompletionPayload(messageId, title, sources,
+                                            ChatMessage.MessageStatus.NORMAL, ttftBreakdown));
                             sender.sendEvent(SSEEventType.DONE.value(), "[DONE]");
                             sender.complete();
                         }),

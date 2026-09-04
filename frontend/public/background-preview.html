@@ -1,0 +1,719 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sentinel 页面背景 · 科技感方案</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet" />
+<style>
+:root{
+  --c1:#4F46E5; --c2:#7C3AED; --c3:#A855F7; --c4:#3B82F6;
+  --intensity:1;      /* 背景强度 */
+  --speed:1;          /* 动效速度倍率 */
+  /* 浅色模式基底 */
+  --base:#FAFAFA;
+  --ink:#1A1A1A;
+  --ink2:#6B7280;
+  --line:rgba(79,70,229,.10);
+  --blob1:rgba(124,58,237,.30);
+  --blob2:rgba(59,130,246,.26);
+  --blob3:rgba(168,85,247,.22);
+  --grid:rgba(79,70,229,.10);
+  --page:#070912; --card:rgba(255,255,255,.045); --bd:rgba(255,255,255,.09);
+  --txt:#e9ecf5; --dim:#98a0b8;
+}
+body[data-mode="dark"]{
+  --base:#0B1020;
+  --ink:#E9ECF5;
+  --ink2:#98A0B8;
+  --line:rgba(148,163,255,.16);
+  --blob1:rgba(124,58,237,.46);
+  --blob2:rgba(59,130,246,.40);
+  --blob3:rgba(168,85,247,.34);
+  --grid:rgba(148,163,255,.16);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:var(--page);color:var(--txt);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  -webkit-font-smoothing:antialiased;min-height:100vh;overflow-x:hidden;
+}
+.wrap{max-width:1240px;margin:0 auto;padding:30px 22px 90px}
+.topbar{display:flex;flex-wrap:wrap;align-items:flex-end;gap:16px;justify-content:space-between;margin-bottom:18px}
+.title{font-size:25px;font-weight:700;letter-spacing:-.02em;margin:0 0 6px}
+.subtitle{margin:0;color:var(--dim);font-size:13px;line-height:1.7}
+h2.sec{font-size:17px;font-weight:650;margin:38px 0 5px;letter-spacing:-.01em}
+p.secsub{color:var(--dim);font-size:12.8px;margin:0 0 15px;line-height:1.75}
+code{background:rgba(255,255,255,.08);padding:1px 6px;border-radius:5px;font-size:11.5px}
+
+/* ---------- 控件 ---------- */
+.controls{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.chip{display:inline-flex;align-items:center;gap:7px;background:var(--card);border:1px solid var(--bd);padding:7px 13px;border-radius:999px;font-size:12.5px;color:var(--txt);transition:.2s}
+.chip input{accent-color:#60a5fa;margin:0}
+button.act{border:1px solid var(--bd);background:var(--card);color:var(--txt);padding:8px 15px;border-radius:999px;font-size:12.5px;cursor:pointer;font-family:inherit;transition:.2s}
+button.act:hover{background:rgba(255,255,255,.13)}
+button.act.on{background:linear-gradient(135deg,#2563eb,#4f46e5);border-color:transparent;color:#fff}
+input[type=range]{accent-color:#60a5fa;width:92px;margin:0}
+
+/* ---------- 主舞台 ---------- */
+.stagebox{border:1px solid var(--bd);border-radius:20px;overflow:hidden;position:relative}
+.stage{
+  position:relative;height:520px;overflow:hidden;
+  background:var(--base);transition:background .3s;
+}
+.stage .fx{position:absolute;inset:0}
+.stage.full{position:fixed;inset:0;z-index:9999;height:auto;border-radius:0;border:0}
+.stage-hud{
+  position:absolute;top:14px;left:16px;z-index:30;display:flex;gap:8px;align-items:center;flex-wrap:wrap;
+}
+.stage-hud .tag{
+  font-size:11px;padding:4px 10px;border-radius:999px;background:rgba(0,0,0,.42);
+  color:#fff;backdrop-filter:blur(6px);letter-spacing:.02em;
+}
+.stage-hud .tag.low{background:rgba(16,185,129,.55)}
+.stage-hud .tag.mid{background:rgba(245,158,11,.55)}
+.stage-hud .tag.high{background:rgba(239,68,68,.55)}
+
+/* 舞台上的样例内容（检验可读性） */
+.sample{
+  position:absolute;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;
+  padding:40px;pointer-events:none;
+}
+.sample .panel{
+  width:100%;max-width:520px;display:flex;flex-direction:column;gap:12px;
+}
+.bub{
+  max-width:80%;padding:11px 15px;border-radius:14px;font-size:13.5px;line-height:1.75;
+  box-shadow:0 8px 24px -12px rgba(15,23,42,.35);
+}
+.bub.user{align-self:flex-end;background:linear-gradient(135deg,var(--c1),var(--c4));color:#fff;border-bottom-right-radius:5px}
+.bub.ai{align-self:flex-start;background:rgba(255,255,255,.82);color:var(--ink);border-bottom-left-radius:5px;backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.6)}
+body[data-mode="dark"] .bub.ai{background:rgba(30,41,59,.72);color:#E9ECF5;border-color:rgba(148,163,184,.25)}
+.bub.plain{background:transparent;box-shadow:none;color:var(--ink);font-size:12.5px;align-self:center}
+body[data-mode="dark"] .bub.plain{color:var(--ink2)}
+
+/* ---------- 方案卡 ---------- */
+.grid{display:grid;gap:13px}
+.g{grid-template-columns:repeat(auto-fill,minmax(252px,1fr))}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:15px;padding:13px;transition:.22s;cursor:pointer}
+.card:hover{border-color:rgba(96,165,250,.45);background:rgba(255,255,255,.07)}
+.card.picked{border-color:rgba(96,165,250,.7);box-shadow:0 0 0 1px rgba(96,165,250,.3),0 16px 44px -26px rgba(59,130,246,.85)}
+.card .thumb{
+  position:relative;height:104px;border-radius:10px;overflow:hidden;background:var(--base);margin-bottom:10px;
+}
+.card .thumb .fx{position:absolute;inset:0;transform:scale(1)}
+.card .n{font-size:12.8px;font-weight:650;margin:0 0 4px;display:flex;justify-content:space-between;align-items:center;gap:6px}
+.card .n em{font-style:normal;font-size:10.5px;color:#60a5fa;font-weight:500}
+.card .d{font-size:11px;color:var(--dim);margin:0 0 9px;line-height:1.6;min-height:44px}
+.metas{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:9px}
+.mt{font-size:10px;padding:2px 7px;border-radius:5px;border:1px solid var(--bd);color:var(--dim)}
+.mt.css{color:#93c5fd;border-color:rgba(147,197,253,.35)}
+.mt.js{color:#c4b5fd;border-color:rgba(196,181,253,.35)}
+.mt.good{color:#6ee7b7;border-color:rgba(110,231,183,.35)}
+.mt.warn{color:#fcd34d;border-color:rgba(252,211,77,.35)}
+.mt.bad{color:#fca5a5;border-color:rgba(252,165,165,.35)}
+.card .pick{width:100%;border:1px solid var(--bd);background:rgba(255,255,255,.05);color:var(--txt);padding:6px;border-radius:8px;font-size:11.5px;cursor:pointer;font-family:inherit;transition:.2s}
+.card .pick:hover{background:rgba(255,255,255,.13)}
+.card.picked .pick{background:linear-gradient(135deg,#2563eb,#4f46e5);border-color:transparent;color:#fff}
+
+/* ================= 背景方案 ================= */
+.fx{pointer-events:none}
+
+/* --- 01 Aurora Mesh 极光网格 --- */
+.fx-aurora{overflow:hidden}
+.fx-aurora i{position:absolute;display:block;border-radius:50%;filter:blur(56px);opacity:var(--intensity)}
+.fx-aurora i:nth-child(1){width:46%;padding-bottom:46%;left:-6%;top:-8%;background:var(--blob1);animation:dr1 26s ease-in-out infinite}
+.fx-aurora i:nth-child(2){width:40%;padding-bottom:40%;right:-8%;top:4%;background:var(--blob2);animation:dr2 32s ease-in-out infinite}
+.fx-aurora i:nth-child(3){width:52%;padding-bottom:52%;left:24%;bottom:-22%;background:var(--blob3);animation:dr3 38s ease-in-out infinite}
+@keyframes dr1{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(9%,7%) scale(1.12)}}
+@keyframes dr2{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(-8%,11%) scale(1.08)}}
+@keyframes dr3{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(-6%,-9%) scale(1.15)}}
+.fx-aurora .mesh{
+  position:absolute;inset:0;opacity:calc(var(--intensity) * .85);
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:44px 44px;
+  mask-image:radial-gradient(ellipse 80% 70% at 50% 45%,#000 20%,transparent 78%);
+  -webkit-mask-image:radial-gradient(ellipse 80% 70% at 50% 45%,#000 20%,transparent 78%);
+}
+
+/* --- 02 Perspective Grid 透视网格 --- */
+.fx-pgrid{overflow:hidden;
+  background:
+    radial-gradient(ellipse 60% 40% at 50% 62%,var(--blob1),transparent 70%),
+    linear-gradient(180deg,var(--base) 0%,var(--base) 48%,color-mix(in srgb,var(--base) 70%,#4F46E5) 100%);
+}
+.fx-pgrid .horizon{
+  position:absolute;left:0;right:0;top:52%;height:2px;
+  background:linear-gradient(90deg,transparent,var(--c3),var(--c4),transparent);
+  opacity:calc(var(--intensity) * .9);
+  box-shadow:0 0 22px 5px var(--blob1);
+}
+.fx-pgrid .floor{
+  position:absolute;left:-60%;width:220%;top:52%;bottom:-14%;
+  transform:perspective(320px) rotateX(66deg);
+  transform-origin:50% 0;
+  opacity:var(--intensity);
+  background-image:
+    linear-gradient(rgba(148,163,255,.42) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(148,163,255,.42) 1px,transparent 1px);
+  background-size:64px 64px;
+  animation:pgr 5.2s linear infinite;
+  mask-image:linear-gradient(180deg,#000 0%,rgba(0,0,0,.55) 42%,transparent 88%);
+  -webkit-mask-image:linear-gradient(180deg,#000 0%,rgba(0,0,0,.55) 42%,transparent 88%);
+}
+@keyframes pgr{to{background-position:0 64px,0 0}}
+.fx-pgrid .glow{
+  position:absolute;left:0;right:0;top:52%;height:44%;
+  background:radial-gradient(ellipse 70% 100% at 50% 0%,var(--blob2),transparent 72%);
+  opacity:var(--intensity);
+}
+
+/* --- 03 Hex Mesh 六边形蜂窝 --- */
+.fx-hex{overflow:hidden}
+.fx-hex svg{position:absolute;inset:0;width:100%;height:100%;opacity:var(--intensity);animation:hexd 34s linear infinite}
+@keyframes hexd{to{transform:translate(-30px,-52px)}}
+.fx-hex .hglow{
+  position:absolute;inset:0;
+  background:radial-gradient(ellipse 70% 60% at 22% 18%,var(--blob1),transparent 62%),
+             radial-gradient(ellipse 60% 60% at 82% 78%,var(--blob2),transparent 62%);
+  opacity:calc(var(--intensity) * .8);
+  animation:hbreathe 9s ease-in-out infinite;
+}
+@keyframes hbreathe{0%,100%{opacity:calc(var(--intensity) * .55)}50%{opacity:calc(var(--intensity) * .95)}}
+
+/* --- 04 Circuit Trace 电路走线 --- */
+.fx-circ{overflow:hidden}
+.fx-circ svg{position:absolute;inset:0;width:100%;height:100%;opacity:var(--intensity)}
+.fx-circ .flow{
+  fill:none;stroke:var(--c3);stroke-width:1.6;stroke-linecap:round;
+  stroke-dasharray:26 210;opacity:.95;
+  animation:cf 5.5s linear infinite;
+}
+@keyframes cf{to{stroke-dashoffset:-472}}
+.fx-circ .base{fill:none;stroke:var(--line);stroke-width:1}
+.fx-circ .node{fill:var(--c3);opacity:.85;animation:np 3.6s ease-in-out infinite}
+@keyframes np{0%,100%{opacity:.35}50%{opacity:.95}}
+
+/* --- 05 Scan Grid 扫描网格 --- */
+.fx-scan{overflow:hidden}
+.fx-scan .g{
+  position:absolute;inset:0;opacity:calc(var(--intensity) * .8);
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:38px 38px;
+}
+.fx-scan .beam{
+  position:absolute;left:0;right:0;height:180px;top:-180px;
+  background:linear-gradient(180deg,transparent,var(--blob2),transparent);
+  opacity:calc(var(--intensity) * .55);
+  animation:sc 8s cubic-bezier(.5,0,.5,1) infinite;
+}
+@keyframes sc{0%{top:-180px}55%,100%{top:100%}}
+.fx-scan .line{
+  position:absolute;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--c3),transparent);
+  opacity:calc(var(--intensity) * .8);animation:sl 8s cubic-bezier(.5,0,.5,1) infinite;
+}
+@keyframes sl{0%{top:-2px}55%,100%{top:100%}}
+.fx-scan .vig{
+  position:absolute;inset:0;
+  background:radial-gradient(ellipse 90% 80% at 50% 50%,transparent 42%,color-mix(in srgb,var(--base) 62%,#000) 100%);
+  opacity:.55;
+}
+.fx-scan .blo{
+  position:absolute;inset:0;
+  background:radial-gradient(ellipse 60% 50% at 18% 12%,var(--blob1),transparent 60%),
+             radial-gradient(ellipse 55% 50% at 84% 88%,var(--blob2),transparent 60%);
+  opacity:calc(var(--intensity) * .75);
+}
+
+/* --- 06/07/08 canvas --- */
+.fx canvas{position:absolute;inset:0;width:100%;height:100%;display:block;opacity:var(--intensity)}
+
+/* 强度为 0 时完全隐藏 */
+body[data-i="0"] .fx{opacity:0}
+
+.bar{margin:0 0 16px;padding:10px 15px;border-radius:12px;font-size:12.5px;line-height:1.7;
+  background:linear-gradient(135deg,rgba(37,99,235,.26),rgba(124,58,237,.18));border:1px solid rgba(96,165,250,.35)}
+.note{margin-top:30px;padding:15px 18px;border:1px dashed rgba(255,255,255,.16);border-radius:14px;color:var(--dim);font-size:12.5px;line-height:1.95}
+.note b{color:#93c5fd;font-weight:600}
+.warnbox{margin-top:14px;padding:13px 16px;border-radius:12px;font-size:12.2px;line-height:1.85;
+  background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.35);color:#fcd34d}
+.warnbox b{color:#fde68a}
+
+/* 性能说明表 */
+.tblwrap{overflow-x:auto;border:1px solid var(--bd);border-radius:14px}
+table{width:100%;border-collapse:collapse;font-size:12.2px;min-width:620px}
+th,td{padding:9px 13px;text-align:left;border-bottom:1px solid var(--bd)}
+th{color:#93c5fd;font-weight:600;background:rgba(255,255,255,.03);font-size:11.5px}
+td{color:var(--dim)}
+td b{color:var(--txt);font-weight:600}
+tr:last-child td{border-bottom:0}
+
+@media (prefers-reduced-motion: reduce){
+  .fx i,.fx-aurora .mesh,.fx-pgrid .floor,.fx-hex svg,.fx-hex .hglow,
+  .fx-circ .flow,.fx-circ .node,.fx-scan .beam,.fx-scan .line{animation:none !important}
+}
+body.no-anim .fx i,body.no-anim .fx-aurora .mesh,body.no-anim .fx-pgrid .floor,
+body.no-anim .fx-hex svg,body.no-anim .fx-hex .hglow,body.no-anim .fx-circ .flow,
+body.no-anim .fx-circ .node,body.no-anim .fx-scan .beam,body.no-anim .fx-scan .line{animation:none !important}
+</style>
+</head>
+<body data-mode="light">
+<div class="wrap">
+
+  <div class="topbar">
+    <div>
+      <h1 class="title">Sentinel 页面背景 · 科技感方案</h1>
+      <p class="subtitle">现有背景是 <b style="color:#93c5fd">静态 PNG</b>（<code>MainLayout.tsx</code> 铺 <code>bg-4-pastel.png</code> + 白色遮罩），零动效。<br/>
+      下方 8 个方案，可通过「叠加样例内容」直接检验<b style="color:#93c5fd">文字可读性</b> —— 这是背景能否用于聊天区的唯一标准。</p>
+    </div>
+    <div class="controls">
+      <button class="act" id="modeBtn">模式：浅色</button>
+      <button class="act" id="uiBtn">叠加样例：关</button>
+      <button class="act" id="fullBtn">全屏</button>
+      <label class="chip">强度 <input type="range" id="intR" min="0" max="150" value="100"><span id="intV">1.00×</span></label>
+      <label class="chip">速度 <input type="range" id="spdR" min="20" max="260" value="100"><span id="spdV">1.00×</span></label>
+      <button class="act" id="animBtn">动效暂停</button>
+    </div>
+  </div>
+
+  <div class="bar" id="bar">当前：<b>Aurora Mesh 极光网格</b>　|　建议用途：<b>C 端聊天区 · 登录页 · 后台全站</b></div>
+
+  <div class="stagebox">
+    <div class="stage" id="stage">
+      <div class="stage-hud">
+        <span class="tag" id="hudName">Aurora Mesh</span>
+        <span class="tag" id="hudType">CSS</span>
+        <span class="tag low" id="hudFit">浅底适用</span>
+      </div>
+      <div class="fx" id="stageFx"></div>
+      <div class="sample" id="sample" style="display:none">
+        <div class="panel">
+          <div class="bub ai">已为你检索到 3 篇相关文档，涉及部署架构与配置说明。</div>
+          <div class="bub user">帮我总结一下部署步骤</div>
+          <div class="bub ai">部署分为三步：配置环境变量、初始化数据库、启动服务。</div>
+          <div class="bub plain">↑ 检验：文字与气泡是否仍然清晰易读</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="warnbox">
+    <b>⚠ 背景设计的第一原则是「不干扰内容」：</b>聊天区是长时间阅读文字的场景，
+    高对比度或高频运动的背景会引起视觉疲劳。下方每个方案都标注了<b>可读性等级</b>：
+    <b>✓ 低干扰</b> 可直接用于聊天区；<b>△ 中干扰</b> 建议仅用于登录页/欢迎页；<b>✗ 高干扰</b> 只适合作装饰性场景。
+    请务必点开「叠加样例」逐一验证。
+  </div>
+
+  <h2 class="sec">① 纯 CSS 方案 <span style="font-size:12px;color:var(--dim);font-weight:400">— 零 JS，性能最优</span></h2>
+  <p class="secsub">只靠 CSS 渐变与 keyframes，无 canvas、无逐帧计算，即使低端设备也几乎无开销。</p>
+  <div class="grid g" id="cssGrid"></div>
+
+  <h2 class="sec">② Canvas 方案 <span style="font-size:12px;color:var(--dim);font-weight:400">— 需 JS，效果更强</span></h2>
+  <p class="secsub">有逐帧绘制开销。已做 <code>devicePixelRatio</code> 适配、页面不可见自动暂停、粒子数按宽度自适应；落地时可再按需降密度。</p>
+  <div class="grid g" id="jsGrid"></div>
+
+  <h2 class="sec">③ 方案横向对比</h2>
+  <p class="secsub">用于最终决策：可读性、性能、实现成本、适用场景。</p>
+  <div class="tblwrap">
+    <table>
+      <thead><tr><th>方案</th><th>类型</th><th>可读性</th><th>性能</th><th>实现成本</th><th>建议场景</th><th>动效强度</th></tr></thead>
+      <tbody id="cmpBody"></tbody>
+    </table>
+  </div>
+
+  <div class="note">
+    <b>落地清单（待你确认后统一实施）：</b><br/>
+    1. <code>TechBackground.tsx</code> —— 背景组件，<code>variant</code>（aurora / pgrid / hex / circ / scan / neural / rain / particle）、<code>intensity</code>、<code>animated</code> props<br/>
+    2. <b>挂载点</b>：C 端替换 <code>MainLayout.tsx:15-20</code> 的静态 PNG 层；登录页替换 <code>LoginPage.tsx:40</code>；后台替换 <code>globals.css:297</code> 的 <code>.admin-main</code> 背景图<br/>
+    3. <code>globals.css</code> —— 补 keyframes（dr1/dr2/dr3、pgr、hexd、cf、sc 等）<br/>
+    4. Canvas 方案需 <code>useEffect</code> 管理 rAF 生命周期：resize 重建、<code>visibilitychange</code> 暂停、卸载时 <code>cancelAnimationFrame</code><br/>
+    5. <b>无障碍</b>：<code>prefers-reduced-motion</code> 时降级为静态渐变（Canvas 方案只绘制首帧后停止）<br/>
+    6. <b>性能护栏</b>：Canvas 粒子数按容器宽度自适应；聊天区在流式输出时可临时降帧<br/>
+    <b style="color:#fcd34d">当前状态：本页与 wordmark-preview-v2.html、brandbar-preview.html 均为 public/ 下独立预览，未改动 frontend/src 任何文件。</b>
+  </div>
+</div>
+
+<script>
+(function(){
+/* ================= 方案定义 ================= */
+function hexSVG(){
+  return '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="104" viewBox="0 0 120 104">'+
+    '<defs><pattern id="hp" width="30" height="52" patternUnits="userSpaceOnUse">'+
+    '<path d="M15 0 L30 8.66 L30 25.98 L15 34.64 L0 25.98 L0 8.66 Z" fill="none" stroke="rgba(148,163,255,.30)" stroke-width="1"/>'+
+    '<path d="M30 25.98 L45 34.64" fill="none" stroke="rgba(148,163,255,.30)" stroke-width="1"/>'+
+    '<path d="M0 25.98 L-15 34.64" fill="none" stroke="rgba(148,163,255,.30)" stroke-width="1"/>'+
+    '</pattern></defs><rect width="120" height="104" fill="url(#hp)"/></svg>';
+}
+function circSVG(){
+  var b='<g class="base">'+
+    '<path d="M0 60 H180 V150 H340 V70 H520 V200 H700 V110 H900 V180 H1100 V90 H1300"/>'+
+    '<path d="M0 260 H220 V340 H420 V280 H640 V380 H860 V300 H1080 V370 H1300"/>'+
+    '<path d="M0 460 H160 V530 H380 V470 H600 V560 H820 V490 H1040 V550 H1300"/>'+
+    '<path d="M120 0 V600 M420 0 V600 M760 0 V600 M1080 0 V600"/>'+
+    '</g>';
+  var f='';
+  ['M0 60 H180 V150 H340 V70 H520 V200 H700 V110 H900 V180 H1100 V90 H1300',
+   'M0 260 H220 V340 H420 V280 H640 V380 H860 V300 H1080 V370 H1300',
+   'M0 460 H160 V530 H380 V470 H600 V560 H820 V490 H1040 V550 H1300',
+   'M120 0 V600','M760 0 V600'].forEach(function(d,i){
+    f+='<path class="flow" d="'+d+'" style="animation-delay:'+(i*0.9)+'s"/>';
+  });
+  var n='';
+  [[180,150],[520,200],[900,180],[420,280],[860,300],[160,530],[600,560],[1080,550]].forEach(function(p,i){
+    n+='<circle class="node" cx="'+p[0]+'" cy="'+p[1]+'" r="2.6" style="animation-delay:'+(i*0.35)+'s"/>';
+  });
+  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1300 600" preserveAspectRatio="xMidYMid slice">'+
+    '<rect width="1300" height="600" fill="url(#hp)"/>'+b+f+n+'</svg>';
+}
+
+var SCHEMES=[
+{ id:'aurora', name:'Aurora Mesh', tag:'极光网格', type:'css',
+  contrast:'good', perf:'good', cost:'低', motion:'弱',
+  fit:'C 端聊天区 · 登录页 · 后台',
+  desc:'多层蓝紫光斑缓慢漂移，叠一层细网格。气质最接近现有 bg-4-pastel，但有了呼吸感。',
+  render:function(){ return '<i></i><i></i><i></i><div class="mesh"></div>'; },
+  cls:'fx-aurora' },
+
+{ id:'pgrid', name:'Perspective Grid', tag:'透视网格', type:'css',
+  contrast:'warn', perf:'good', cost:'低', motion:'中',
+  fit:'登录页 · 欢迎页 · Hero',
+  desc:'Synthwave 式地平线网格，网格持续向观察者推进。视觉冲击最强，但聊天区会偏吵。',
+  render:function(){ return '<div class="glow"></div><div class="floor"></div><div class="horizon"></div>'; },
+  cls:'fx-pgrid' },
+
+{ id:'hex', name:'Hex Mesh', tag:'六边形蜂窝', type:'css',
+  contrast:'good', perf:'good', cost:'低', motion:'弱',
+  fit:'后台 · 知识图谱页 · 聊天区',
+  desc:'六边形蜂窝网络 + 缓慢呼吸辉光。语义贴合「知识网络 / 图谱」，比纯网格更有结构感。',
+  render:function(){ return '<div class="hglow"></div>'+hexSVG(); },
+  cls:'fx-hex' },
+
+{ id:'circ', name:'Circuit Trace', tag:'电路走线', type:'css',
+  contrast:'good', perf:'good', cost:'中', motion:'中',
+  fit:'后台 · 登录页',
+  desc:'PCB 走线纹理，光点沿线路流动、节点依次亮起。最贴合「AI 计算核心」的语义。',
+  render:function(){ return circSVG(); },
+  cls:'fx-circ' },
+
+{ id:'scan', name:'Scan Grid', tag:'扫描网格', type:'css',
+  contrast:'good', perf:'good', cost:'低', motion:'中',
+  fit:'后台监控页 · 聊天区（低强度）',
+  desc:'网格 + 一道缓慢下扫的亮线，四角压暗形成监视器质感。有「哨兵在巡视」的隐喻。',
+  render:function(){ return '<div class="blo"></div><div class="g"></div><div class="beam"></div><div class="line"></div><div class="vig"></div>'; },
+  cls:'fx-scan' },
+
+{ id:'neural', name:'Neural Network', tag:'神经网络', type:'js',
+  contrast:'good', perf:'warn', cost:'中', motion:'中',
+  fit:'登录页 · 欢迎页 · 后台',
+  desc:'点阵 + 邻近自动连线，鼠标靠近时节点聚集。最经典的科技感背景，交互性最强。',
+  canvas:'neural' },
+
+{ id:'rain', name:'Data Rain', tag:'数据雨', type:'js',
+  contrast:'bad', perf:'warn', cost:'中', motion:'强',
+  fit:'仅登录页 / 装饰区',
+  desc:'字符列下落。已改为蓝紫低密度，但运动感仍强，聊天区禁用。',
+  canvas:'rain' },
+
+{ id:'particle', name:'Particle Field', tag:'粒子场', type:'js',
+  contrast:'good', perf:'warn', cost:'中', motion:'弱',
+  fit:'C 端聊天区 · 全站',
+  desc:'缓慢上浮的光点 + 视差层次。动效极轻，是 Canvas 方案里唯一适合阅读场景的。',
+  canvas:'particle' }
+];
+
+var CONTRAST={good:{t:'✓ 低干扰',c:'low'},warn:{t:'△ 中干扰',c:'mid'},bad:{t:'✗ 高干扰',c:'high'}};
+var PERF={good:'优',warn:'中',bad:'差'};
+
+/* ================= Canvas 引擎 ================= */
+var live=[];   // {canvas, stop}
+function mkCanvas(host, kind, animate){
+  var cv=document.createElement('canvas');
+  host.appendChild(cv);
+  var ctx=cv.getContext('2d');
+  var W=0,H=0,DPR=Math.min(window.devicePixelRatio||1,2);
+  var raf=null, t0=0, speed=1;
+  var objs=[], mouse={x:-9999,y:-9999}, active=true;
+
+  function resize(){
+    var r=host.getBoundingClientRect();
+    W=Math.max(1,Math.round(r.width)); H=Math.max(1,Math.round(r.height));
+    cv.width=W*DPR; cv.height=H*DPR;
+    cv.style.width=W+'px'; cv.style.height=H+'px';
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+    init();
+  }
+  function isDark(){ return document.body.dataset.mode==='dark'; }
+
+  function init(){
+    objs=[];
+    if(kind==='neural'){
+      var n=Math.max(18,Math.min(78,Math.round(W*H/11000)));
+      for(var i=0;i<n;i++) objs.push({x:Math.random()*W,y:Math.random()*H,
+        vx:(Math.random()-.5)*.22,vy:(Math.random()-.5)*.22,r:Math.random()*1.5+1});
+    }else if(kind==='rain'){
+      var cols=Math.max(10,Math.floor(W/26));
+      for(var c=0;c<cols;c++) objs.push({x:c*26+13,y:Math.random()*-H,
+        sp:Math.random()*.9+.4,len:Math.floor(Math.random()*10+5),ch:[]});
+      for(var k=0;k<objs.length;k++){ for(var m=0;m<objs[k].len;m++) objs[k].ch.push(rnd()); }
+    }else{
+      var pn=Math.max(16,Math.min(60,Math.round(W*H/15000)));
+      for(var p=0;p<pn;p++) objs.push({x:Math.random()*W,y:Math.random()*H,
+        r:Math.random()*2.2+.6,vy:-(Math.random()*.16+.05),o:Math.random()*.5+.25,ph:Math.random()*6.28});
+    }
+  }
+  var POOL='01<>[]{}/\\|=+*#$%&@ABCDEF';
+  function rnd(){ return POOL[Math.floor(Math.random()*POOL.length)]; }
+
+  function step(dt){
+    var d=isDark();
+    ctx.clearRect(0,0,W,H);
+    if(kind==='neural'){
+      for(var i=0;i<objs.length;i++){
+        var o=objs[i];
+        o.x+=o.vx*dt*speed; o.y+=o.vy*dt*speed;
+        if(o.x<0||o.x>W)o.vx*=-1; if(o.y<0||o.y>H)o.vy*=-1;
+      }
+      var MAX=Math.min(150,W*.22);
+      for(var a=0;a<objs.length;a++){
+        for(var b=a+1;b<objs.length;b++){
+          var dx=objs[a].x-objs[b].x, dy=objs[a].y-objs[b].y;
+          var dd=Math.sqrt(dx*dx+dy*dy);
+          if(dd<MAX){
+            ctx.strokeStyle = d? 'rgba(148,163,255,'+(0.30*(1-dd/MAX))+')'
+                               : 'rgba(79,70,229,'+(0.22*(1-dd/MAX))+')';
+            ctx.lineWidth=1;
+            ctx.beginPath(); ctx.moveTo(objs[a].x,objs[a].y); ctx.lineTo(objs[b].x,objs[b].y); ctx.stroke();
+          }
+        }
+      }
+      for(var j=0;j<objs.length;j++){
+        var p=objs[j];
+        var dm=Math.sqrt((p.x-mouse.x)*(p.x-mouse.x)+(p.y-mouse.y)*(p.y-mouse.y));
+        var near=dm<120;
+        ctx.fillStyle = d? (near?'rgba(196,181,253,.95)':'rgba(148,163,255,.65)')
+                         : (near?'rgba(124,58,237,.95)':'rgba(79,70,229,.48)');
+        ctx.beginPath(); ctx.arc(p.x,p.y,near?p.r*1.5:p.r,0,6.2832); ctx.fill();
+      }
+    }else if(kind==='rain'){
+      ctx.font='13px "Orbitron",monospace';
+      for(var c=0;c<objs.length;c++){
+        var col=objs[c];
+        col.y+=col.sp*dt*speed*1.6;
+        if(col.y>H+col.len*17) { col.y=-Math.random()*300; }
+        if(Math.random()<0.06) col.ch[Math.floor(Math.random()*col.len)]=rnd();
+        for(var m=0;m<col.len;m++){
+          var y=col.y-m*17;
+          if(y<-20||y>H+20) continue;
+          var al=(1-m/col.len)*(d?0.5:0.32);
+          if(m===0) al=d?0.9:0.7;
+          ctx.fillStyle= m===0 ? (d?'rgba(224,231,255,'+al+')':'rgba(79,70,229,'+al+')')
+                               : (d?'rgba(148,163,255,'+al+')':'rgba(124,58,237,'+al+')');
+          ctx.fillText(col.ch[m],col.x,y);
+        }
+      }
+    }else{
+      for(var i2=0;i2<objs.length;i2++){
+        var q=objs[i2];
+        q.y+=q.vy*dt*speed;
+        if(q.y<-10){ q.y=H+10; q.x=Math.random()*W; }
+        var wob=Math.sin((t0/1000)*0.7+q.ph)*6;
+        var g=ctx.createRadialGradient(q.x+wob,q.y,0,q.x+wob,q.y,q.r*4.5);
+        var col2 = d? '148,163,255' : '99,102,241';
+        g.addColorStop(0,'rgba('+col2+','+q.o+')');
+        g.addColorStop(1,'rgba('+col2+',0)');
+        ctx.fillStyle=g;
+        ctx.beginPath(); ctx.arc(q.x+wob,q.y,q.r*4.5,0,6.2832); ctx.fill();
+      }
+    }
+  }
+
+  function loop(ts){
+    if(!active) return;
+    var dt=Math.min(34, ts? (ts-(t0ts||ts)) : 16); t0ts=ts;
+    t0+=dt;
+    step(dt/16.67);
+    raf=requestAnimationFrame(loop);
+  }
+  var t0ts=0;
+
+  function onMouse(e){
+    var r=cv.getBoundingClientRect();
+    mouse.x=e.clientX-r.left; mouse.y=e.clientY-r.top;
+  }
+  function onLeave(){ mouse.x=-9999; mouse.y=-9999; }
+  function onVis(){ active=!document.hidden; if(active){ t0ts=0; raf=requestAnimationFrame(loop);} else cancelAnimationFrame(raf); }
+
+  cv.addEventListener('mousemove',onMouse);
+  cv.addEventListener('mouseleave',onLeave);
+  host.addEventListener('mousemove',onMouse);
+  host.addEventListener('mouseleave',onLeave);
+  document.addEventListener('visibilitychange',onVis);
+  var ro=null;
+  if(window.ResizeObserver){ ro=new ResizeObserver(resize); ro.observe(host); }
+  else window.addEventListener('resize',resize);
+
+  resize();
+  if(animate){
+    raf=requestAnimationFrame(loop);
+  }else{
+    // 缩略图：预热若干帧后定格
+    for(var w=0;w<90;w++){ t0+=16.7; step(1); }
+  }
+
+  return {
+    setSpeed:function(s){ speed=s; },
+    destroy:function(){
+      active=false; cancelAnimationFrame(raf);
+      cv.removeEventListener('mousemove',onMouse); cv.removeEventListener('mouseleave',onLeave);
+      host.removeEventListener('mousemove',onMouse); host.removeEventListener('mouseleave',onLeave);
+      document.removeEventListener('visibilitychange',onVis);
+      if(ro) ro.disconnect(); else window.removeEventListener('resize',resize);
+      if(cv.parentNode) cv.parentNode.removeChild(cv);
+    }
+  };
+}
+
+function killCanvas(){
+  live.forEach(function(o){ o.destroy(); });
+  live=[];
+}
+
+/* ================= 渲染 ================= */
+var stageFx=document.getElementById('stageFx');
+var cur=SCHEMES[0];
+var curSpeed=1, animate=true;
+
+function paint(host, sc, animateIt){
+  host.innerHTML='';
+  host.className='fx';
+  if(sc.canvas){
+    live.push(mkCanvas(host, sc.canvas, animateIt));
+  }else{
+    host.classList.add(sc.cls);
+    host.innerHTML=sc.render();
+  }
+}
+function applyStage(){
+  killCanvas();
+  paint(stageFx, cur, animate);
+  live.forEach(function(o){ o.setSpeed(curSpeed); });
+  var ci=CONTRAST[cur.contrast];
+  document.getElementById('hudName').textContent=cur.name;
+  document.getElementById('hudType').textContent=cur.type==='css'?'纯 CSS':'Canvas';
+  var hf=document.getElementById('hudFit');
+  hf.textContent=ci.t; hf.className='tag '+ci.c;
+  document.getElementById('bar').innerHTML=
+    '当前：<b>'+cur.name+' · '+cur.tag+'</b>　|　建议用途：<b>'+cur.fit+'</b>　|　可读性：<b>'+ci.t+'</b>　|　性能：<b>'+PERF[cur.perf]+'</b>';
+}
+
+/* 卡片 */
+function makeCard(sc){
+  var c=document.createElement('article');
+  c.className='card'+(sc===cur?' picked':'');
+  var cm=CONTRAST[sc.contrast];
+  c.innerHTML=
+    '<div class="thumb"><div class="fx"></div></div>'+
+    '<p class="n">'+sc.name+'<em>'+sc.tag+'</em></p>'+
+    '<p class="d">'+sc.desc+'</p>'+
+    '<div class="metas">'+
+      '<span class="mt '+(sc.type==='css'?'css':'js')+'">'+(sc.type==='css'?'纯 CSS':'Canvas')+'</span>'+
+      '<span class="mt '+sc.contrast+'">可读 '+cm.t+'</span>'+
+      '<span class="mt '+(sc.perf==='good'?'good':'warn')+'">性能 '+PERF[sc.perf]+'</span>'+
+    '</div>'+
+    '<button class="pick">应用此背景</button>';
+  paint(c.querySelector('.thumb .fx'), sc, false);   // 缩略图静态
+  c.querySelector('.pick').addEventListener('click',function(){
+    cur=sc; applyStage();
+    document.querySelectorAll('.card').forEach(function(x){x.classList.remove('picked');});
+    c.classList.add('picked');
+    stage.scrollIntoView({behavior:'smooth',block:'center'});
+  });
+  return c;
+}
+var cg=document.getElementById('cssGrid'), jg=document.getElementById('jsGrid');
+SCHEMES.forEach(function(sc){
+  (sc.type==='css'?cg:jg).appendChild(makeCard(sc));
+});
+
+/* 对比表 */
+var tb=document.getElementById('cmpBody');
+SCHEMES.forEach(function(sc){
+  var tr=document.createElement('tr');
+  tr.innerHTML='<td><b>'+sc.name+'</b> <span style="opacity:.6">'+sc.tag+'</span></td>'+
+    '<td>'+(sc.type==='css'?'纯 CSS':'Canvas')+'</td>'+
+    '<td>'+CONTRAST[sc.contrast].t+'</td>'+
+    '<td>'+PERF[sc.perf]+'</td>'+
+    '<td>'+sc.cost+'</td>'+
+    '<td>'+sc.fit+'</td>'+
+    '<td>'+sc.motion+'</td>';
+  tb.appendChild(tr);
+});
+
+/* ================= 控件 ================= */
+var stage=document.getElementById('stage');
+var modeBtn=document.getElementById('modeBtn');
+modeBtn.addEventListener('click',function(){
+  var dark=document.body.dataset.mode==='dark';
+  document.body.dataset.mode=dark?'light':'dark';
+  this.textContent='模式：'+(dark?'浅色':'深色');
+  killCanvas(); paint(stageFx,cur,animate);
+  live.forEach(function(o){o.setSpeed(curSpeed);});
+  // 缩略图重绘（适配新模式的配色）
+  document.querySelectorAll('.card').forEach(function(x){x.classList.remove('picked');});
+  cg.innerHTML=''; jg.innerHTML='';
+  SCHEMES.forEach(function(sc){ (sc.type==='css'?cg:jg).appendChild(makeCard(sc)); });
+});
+
+var uiBtn=document.getElementById('uiBtn'), sampleOn=false;
+uiBtn.addEventListener('click',function(){
+  sampleOn=!sampleOn;
+  document.getElementById('sample').style.display=sampleOn?'flex':'none';
+  this.textContent='叠加样例：'+(sampleOn?'开':'关');
+  this.classList.toggle('on',sampleOn);
+});
+
+var fullBtn=document.getElementById('fullBtn'), isFull=false;
+fullBtn.addEventListener('click',function(){
+  isFull=!isFull;
+  stage.classList.toggle('full',isFull);
+  this.textContent=isFull?'退出全屏':'全屏';
+  this.classList.toggle('on',isFull);
+  document.body.style.overflow=isFull?'hidden':'';
+  setTimeout(function(){ killCanvas(); paint(stageFx,cur,animate); live.forEach(function(o){o.setSpeed(curSpeed);}); },60);
+});
+
+var intR=document.getElementById('intR'), intV=document.getElementById('intV');
+intR.addEventListener('input',function(){
+  var v=this.value/100;
+  document.documentElement.style.setProperty('--intensity',v);
+  document.body.dataset.i = this.value==='0' ? '0' : '1';
+  intV.textContent=v.toFixed(2)+'×';
+});
+var spdR=document.getElementById('spdR'), spdV=document.getElementById('spdV');
+spdR.addEventListener('input',function(){
+  curSpeed=this.value/100;
+  spdV.textContent=curSpeed.toFixed(2)+'×';
+  live.forEach(function(o){o.setSpeed(curSpeed);});
+  var inv=(1/curSpeed).toFixed(2);
+  document.documentElement.style.setProperty('--spd',inv);
+});
+
+var animBtn=document.getElementById('animBtn'), paused=false;
+animBtn.addEventListener('click',function(){
+  paused=!paused;
+  document.body.classList.toggle('no-anim',paused);
+  if(paused){ killCanvas(); paint(stageFx,cur,false); }
+  else { killCanvas(); paint(stageFx,cur,true); live.forEach(function(o){o.setSpeed(curSpeed);}); }
+  this.textContent=paused?'动效播放':'动效暂停';
+});
+
+document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&isFull) fullBtn.click(); });
+
+applyStage();
+})();
+</script>
+</body>
+</html>

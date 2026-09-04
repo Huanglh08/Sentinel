@@ -23,12 +23,19 @@ from dataclasses import dataclass, field
 
 @dataclass
 class RAGConfigProperties:
-    """1:1 翻译 ragent rag.config.RAGConfigProperties。"""
+    """1:1 翻译 ragent rag.config.RAGConfigProperties。
+
+    gate_*：双模型 rerank 相关性门控（P1 负样本治理，ragent Java 端 rag.retrieval-gate.* 同构）。
+    """
     query_rewrite_enabled: bool = True
     rerank_enabled: bool = True
     context_enrich_enabled: bool = True
     citation_enabled: bool = False
     active_collections: list[str] = field(default_factory=list)
+    gate_enabled: bool = True
+    gate_bge_threshold: float = 0.10
+    gate_qwen3_threshold: float = 0.20
+    gate_top_n: int = 8
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "RAGConfigProperties":
@@ -49,12 +56,35 @@ class RAGConfigProperties:
             return raw in ("1", "true", "yes", "on")
         active = env.get("RAG_ACTIVE_COLLECTIONS", "").strip()
         active_list = [s.strip() for s in active.split(",") if s.strip()] if active else []
+
+        def _float(name: str, default: float) -> float:
+            raw = env.get(name, "").strip()
+            if not raw:
+                return default
+            try:
+                return float(raw)
+            except ValueError:
+                return default
+
+        def _int(name: str, default: int) -> int:
+            raw = env.get(name, "").strip()
+            if not raw:
+                return default
+            try:
+                return int(raw)
+            except ValueError:
+                return default
+
         return cls(
             query_rewrite_enabled=_bool("RAG_QUERY_REWRITE_ENABLED", True),
             rerank_enabled=_bool("RAG_RERANK_ENABLED", True),
             context_enrich_enabled=_bool("RAG_CONTEXT_ENRICH_ENABLED", True),
             citation_enabled=_bool("RAG_CITATION_ENABLED", False),
             active_collections=active_list,
+            gate_enabled=_bool("RAG_GATE_ENABLED", True),
+            gate_bge_threshold=_float("RAG_GATE_BGE_THRESHOLD", 0.10),
+            gate_qwen3_threshold=_float("RAG_GATE_QWEN3_THRESHOLD", 0.20),
+            gate_top_n=_int("RAG_GATE_TOP_N", 8),
         )
 
     @classmethod
@@ -74,6 +104,7 @@ class RAGConfigProperties:
         r = y.get("rerank") or {}
         c = y.get("context") or {}
         cit = y.get("citation") or {}
+        g = y.get("retrieval-gate") or {}
         active = y.get("active-collections")
 
         def _env_or(key: str, yml_value, env_value):
@@ -81,10 +112,29 @@ class RAGConfigProperties:
                 return env_value
             return yml_value if yml_value is not None else env_value
 
+        def _as_float(v, default):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return default
+
+        def _as_int(v, default):
+            try:
+                return int(v)
+            except (TypeError, ValueError):
+                return default
+
         return cls(
             query_rewrite_enabled=_env_or("RAG_QUERY_REWRITE_ENABLED", q.get("enabled"), from_env.query_rewrite_enabled),
             rerank_enabled=_env_or("RAG_RERANK_ENABLED", r.get("enabled"), from_env.rerank_enabled),
             context_enrich_enabled=_env_or("RAG_CONTEXT_ENRICH_ENABLED", c.get("enrich", {}).get("enabled"), from_env.context_enrich_enabled),
             citation_enabled=_env_or("RAG_CITATION_ENABLED", cit.get("enabled"), from_env.citation_enabled),
             active_collections=list(active) if isinstance(active, list) else from_env.active_collections,
+            gate_enabled=_env_or("RAG_GATE_ENABLED", g.get("enabled"), from_env.gate_enabled),
+            gate_bge_threshold=_as_float(
+                _env_or("RAG_GATE_BGE_THRESHOLD", g.get("bge-threshold"), None), from_env.gate_bge_threshold),
+            gate_qwen3_threshold=_as_float(
+                _env_or("RAG_GATE_QWEN3_THRESHOLD", g.get("qwen3-threshold"), None), from_env.gate_qwen3_threshold),
+            gate_top_n=_as_int(
+                _env_or("RAG_GATE_TOP_N", g.get("top-n"), None), from_env.gate_top_n),
         )
