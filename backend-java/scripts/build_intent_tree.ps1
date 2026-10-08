@@ -1,4 +1,4 @@
-$token = "2d44a58f55c1441db17c3800f076cfbc"
+$token = "YOUR_LOGIN_TOKEN"
 
 # Step 1: 查知识库 id
 Write-Host "=== Step 1: list knowledge bases ==="
@@ -15,12 +15,12 @@ Write-Host "Using: kb_id=$kbId collection=$collectionName"
 
 # Step 2: 7 nodes (English-only to avoid PowerShell encoding issues)
 $nodes = @(
-    # level=0 根节�?    @{intentCode="kb-llm-security";             name="LLM Agent Security";         level=0; parentCode=$null;                 description="OWASP LLM Top-10 risks for LLM agents: prompt injection, sensitive disclosure, excessive agency, data poisoning, output handling"; examples=@("how to defend against prompt injection","how to prevent agent from exceeding its authority"); collectionNames=@()},
-    # level=2 TOPIC 节点 (�?KB collection)
+    # level=0 根节�?    @{intentCode="kb-llm-security";             name="LLM Agent Security";         level=0; parentCode=$null;                 description="OWASP LLM Top-10 risks for LLM agents: prompt injection, sensitive disclosure, excessive agency, data poisoning, output handling"; examples=@("how to defend against prompt injection","how to prevent agent from exceeding its authority"); collectionNames=@()},
+    # level=2 TOPIC 节点 (�?KB collection)
     @{intentCode="kb-llm-prompt-injection";     name="LLM01 Prompt Injection";    level=2; parentCode="kb-llm-security";     description="OWASP LLM01: identify and mitigate prompt injection attacks"; examples=@("how to defend against prompt injection","how to detect prompt injection"); collectionNames=@($collectionName)},
     @{intentCode="kb-llm-sensitive-disclosure"; name="LLM07 Sensitive Disclosure";level=2; parentCode="kb-llm-security";     description="OWASP LLM07: prevent sensitive data from leaking into context or output"; examples=@("how to handle sensitive data sent to external IP","how to redact PII"); collectionNames=@($collectionName)},
     @{intentCode="kb-llm-excessive-agency";     name="LLM06 Excessive Agency";    level=2; parentCode="kb-llm-security";     description="OWASP LLM06: bound agent tool authority and avoid over-autonomy"; examples=@("how to prevent agent exceeding authority","how to constrain tool calls"); collectionNames=@($collectionName)},
-    # level=0 根节�?    @{intentCode="kb-credential-compromise";    name="Credential Compromise";     level=0; parentCode=$null;                 description="Credential leakage, credential stuffing, weak passwords, password reset abuse"; examples=@("how to handle credential leakage","how to detect credential stuffing"); collectionNames=@()},
+    # level=0 根节�?    @{intentCode="kb-credential-compromise";    name="Credential Compromise";     level=0; parentCode=$null;                 description="Credential leakage, credential stuffing, weak passwords, password reset abuse"; examples=@("how to handle credential leakage","how to detect credential stuffing"); collectionNames=@()},
     @{intentCode="kb-session-hijack";           name="Session Hijack";            level=0; parentCode=$null;                 description="Session management, session fixation, session hijacking detection"; examples=@("how to detect session hijack","session fixation attack"); collectionNames=@()},
     @{intentCode="kb-mitre-attack";             name="MITRE ATT&CK";              level=0; parentCode=$null;                 description="MITRE ATT&CK techniques, mitigations, detections"; examples=@("what technique is credential stuffing","how to mitigate credential filling"); collectionNames=@()}
 )

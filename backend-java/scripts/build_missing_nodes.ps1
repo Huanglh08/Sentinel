@@ -1,4 +1,4 @@
-$token = "2d44a58f55c1441db17c3800f076cfbc"
+$token = "YOUR_LOGIN_TOKEN"
 $kbId = "2092516325183238144"
 $collectionName = "riskdocs"
 

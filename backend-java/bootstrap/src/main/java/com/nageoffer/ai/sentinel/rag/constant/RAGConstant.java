@@ -102,6 +102,11 @@ public class RAGConstant {
     public static final String ANSWER_CITATION_RULES_PROMPT_PATH = "prompt/answer-citation-rules.st";
 
     /**
+     * KB 作答 grounding 强制规则（P1 faithfulness 修复）
+     */
+    public static final String ANSWER_GROUNDING_RULES_PROMPT_PATH = "prompt/answer-grounding-rules.st";
+
+    /**
      * MCP 工具参数提取提示词模板路径
      * 用于从用户问题中提取工具调用参数
      */

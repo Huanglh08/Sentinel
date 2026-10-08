@@ -31,13 +31,6 @@ from core.llm.model_target import ModelTarget
 from core.llm.selector import ModelSelector
 from core.llm.routing_executor import ModelRoutingExecutor, ModelCaller
 from core.llm.routing_service import RoutingLLMService
-from core.llm.mcp import (
-    McpTool, McpExtractionResult,
-    McpToolRegistry, DefaultMcpToolRegistry,
-    McpToolExecutor, McpClientToolExecutor,
-    McpParameterExtractor, LLMMcpParameterExtractor,
-    McpClient,
-)
 
 # 向后兼容：旧 LLMClient 名字 = 新 OpenAIStyleLLMService
 __all__ = [
@@ -53,10 +46,4 @@ __all__ = [
     "AIModelProperties", "ModelGroup", "ModelCandidate", "ProviderConfig", "TierConfig",
     "ModelTarget", "ModelSelector", "ModelRoutingExecutor", "ModelCaller",
     "RoutingLLMService",
-    # MCP
-    "McpTool", "McpExtractionResult",
-    "McpToolRegistry", "DefaultMcpToolRegistry",
-    "McpToolExecutor", "McpClientToolExecutor",
-    "McpParameterExtractor", "LLMMcpParameterExtractor",
-    "McpClient",
 ]

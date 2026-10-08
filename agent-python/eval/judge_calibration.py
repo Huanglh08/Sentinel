@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
-"""LLM-as-a-Judge 校准门禁（ARES 式：judge 判分须先过人工 golden 一致率 >= 90% 才可作门禁指标）。
+"""LLM-as-a-Judge 校准门禁 v2（Cohen's κ + MAD 双指标，ARES 式思想延续）。
 
-参照 ARES（stanford-futuredata/ARES）的校准思想：LLM judge 在进入评测门禁前，
-必须与人工标注的 golden 集比对一致率；分歧样本走仲裁模型裁定。
+v2 变更：以三档分档（BAND_BOUNDS）上的 Cohen's κ 为主指标、MAD 为门禁指标，
+替代 v1 的点级一致率门禁（后者保留为参考读数）。κ 是 chance-corrected 一致性
+度量，可抵消分数堆积高档造成的虚高一致率；MAD 补充幅度信息。
 
-两阶段用法：
+三段工作流：
   # 阶段 1：构建 golden（从最近 e2e JSON 报告分层抽样，重跑 chat 固化三元组，judge 预打分）
   python -m eval.judge_calibration --stage build --samples 20
 
@@ -12,11 +13,16 @@
   # 逐条填写 human_faithfulness / human_answer_relevancy（0~1 分），
   # 判断标准见 rubrics.py 各 rubric；judge 分仅作参考，须独立判断。
 
-  # 阶段 2：一致率校准（judge 用当前 rubric 重打分，与人工分对比）
+  # 阶段 2：judge 用当前 rubric 重打分，输出 κ/MAD/点级一致率 + 仲裁清单
   python -m eval.judge_calibration --stage run
 
-一致点定义：|judge - human| <= 0.10（容差）。门禁：总体一致率 >= 90% PASS。
-分歧 |Δ| > 0.20 的条目列仲裁清单（ARBITER_MODEL 裁定），仲裁结果用于修订 rubric 锚点后重测。
+  # 阶段 3：regate（零 LLM 成本）——合并 N 轮 run 报告，golden human 覆盖快照后
+  # 重算 κ 均值 / MAD 门禁 + 稳定分歧仲裁清单（修 golden / rubric 后必跑）
+  python -m eval.judge_calibration --stage regate --reports A.json,B.json
+
+门禁：κ >= 0.6 且 MAD <= 0.08；单轮 κ 受 judge 随机方差影响大，门禁判定以
+regate 多轮均值为准。分歧 |Δ| > 0.20 列仲裁清单（ARBITER_MODEL 裁定），
+仲裁结果用于修订 rubric 锚点或 golden 后重测。
 """
 from __future__ import annotations
 
@@ -28,9 +34,11 @@ import statistics
 import sys
 import time
 import urllib.parse
+import warnings
 from pathlib import Path
 
 import httpx
+from sklearn.metrics import cohen_kappa_score
 
 from eval.e2e_eval import _is_refused, _login, _source_doc_names, _stream_chat
 from eval.judge import (
@@ -46,11 +54,48 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 GOLDEN_PATH = REPO_ROOT / "evaluation" / "seeds" / "judge-calibration.jsonl"
 REPORT_DIR = REPO_ROOT / "evaluation" / "reports"
 
-# 一致点容差与门禁（README v4 约定：一致率 >= 90%）
+# 一致点容差与门禁（v2：κ 为主指标 + MAD 门禁；点级一致率保留为参考读数）
 TOLERANCE = 0.10
-AGREEMENT_GATE = 0.90
 # 分歧超此值进仲裁清单
 ARBITER_DELTA = 0.20
+# run 阶段报告用的一致率参考线（v2 门禁已改 κ+MAD，此值仅作单轮读数展示，不作门禁）
+AGREEMENT_GATE = 0.90
+# v2 门禁：三档 Cohen's κ 与 MAD（单轮读数；门禁判定以 --stage regate 多轮均值为准）
+KAPPA_GATE = 0.60
+MAD_GATE = 0.08
+# κ 三档分界：low < 0.5 <= mid <= 0.85 < high
+BAND_BOUNDS = (0.5, 0.85)
+
+
+def _band(x: float) -> int:
+    if x < BAND_BOUNDS[0]:
+        return 0
+    if x <= BAND_BOUNDS[1]:
+        return 1
+    return 2
+
+
+def _cohen_kappa(js: list[float], hs: list[float]) -> float:
+    """三档 Cohen's κ（chance-corrected）；完美一致/退化分布时 sklearn 告警或除零，退回 1.0。"""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        try:
+            return float(cohen_kappa_score([_band(x) for x in js], [_band(x) for x in hs]))
+        except Exception:  # noqa: BLE001
+            return 1.0
+
+
+def _calibration_metrics(points: list[dict]) -> dict:
+    """单轮读数：κ / MAD / 点级一致率（参考）。"""
+    js = [p["judge"] for p in points]
+    hs = [p["human"] for p in points]
+    n = len(points)
+    return {
+        "kappa": round(_cohen_kappa(js, hs), 4),
+        "mad": round(sum(abs(j - h) for j, h in zip(js, hs)) / n, 4),
+        "agreement_rate": round(sum(1 for j, h in zip(js, hs) if abs(j - h) <= TOLERANCE) / n, 4),
+        "n": n,
+    }
 
 
 def _latest_e2e_report(reports_dir: Path) -> Path:
@@ -261,6 +306,25 @@ async def _stage_run(args) -> int:
         )
         return 1
 
+    subset_note = ""
+    if args.ids:
+        wanted = {s.strip().upper() for s in args.ids.split(",") if s.strip()}
+        golden = [g for g in golden if g["id"].upper() in wanted]
+        subset_note += f"--ids 指定，命中 {len(golden)} 条"
+    if args.diff_only:
+        ref = Path(args.diff_only)
+        wanted = {p["id"] for p in json.loads(ref.read_text(encoding="utf-8"))["points"] if not p["agree"]}
+        golden = [g for g in golden if g["id"] in wanted]
+        subset_note += f"--diff-only（基线 {ref.stem}）不一致点涉及 {len(golden)} 条样本"
+    if subset_note:
+        print(f"[judge_calibration] 子集模式: {subset_note}", file=sys.stderr)
+
+    metrics_run = args.metrics
+    run_rel = metrics_run in ("all", "rel")
+    run_faith = metrics_run in ("all", "faith")
+    if metrics_run != "all":
+        print(f"[judge_calibration] 单维度模式: 只跑 {'answer_relevancy' if run_rel else 'faithfulness'}", file=sys.stderr)
+
     judge_cfg = JudgeConfig.from_env()
     if not judge_cfg.api_key:
         print("[judge_calibration] 未配置 judge API key", file=sys.stderr)
@@ -268,8 +332,8 @@ async def _stage_run(args) -> int:
     judge = JudgeClient(judge_cfg)
 
     points: list[dict] = []  # 每个 = 一条样本 × 一个维度的判定点
-    for g in golden:
-        if g.get("human_answer_relevancy") is not None:
+    for gi, g in enumerate(golden, 1):
+        if run_rel and g.get("human_answer_relevancy") is not None:
             try:
                 rel_data = await judge.judge(
                     task="answer_relevancy",
@@ -285,8 +349,11 @@ async def _stage_run(args) -> int:
                     "id": g["id"], "metric": "answer_relevancy",
                     "judge": rel_res["score"], "human": float(g["human_answer_relevancy"]),
                     "reason": rel_res["reason"], "notes": g.get("notes", ""),
+                    "coverage_answered": rel_res.get("answered"),
+                    "coverage_partial": rel_res.get("partial"),
+                    "coverage_total": rel_res.get("demand_total"),
                 })
-        if g.get("human_faithfulness") is not None and g.get("contexts"):
+        if run_faith and g.get("human_faithfulness") is not None and g.get("contexts"):
             try:
                 f_data = await judge.judge(
                     task="faithfulness",
@@ -303,6 +370,8 @@ async def _stage_run(args) -> int:
                     "judge": f_res["score"], "human": float(g["human_faithfulness"]),
                     "reason": f_res["reason"], "notes": g.get("notes", ""),
                 })
+        # 逐点进度（stderr，供后台监控窗口解析；无判定点也输出，防监控饿死）
+        print(f"[judge_calibration] point {gi}/{len(golden)} {g['id']}", file=sys.stderr, flush=True)
 
     for p in points:
         p["delta"] = round(abs(p["judge"] - p["human"]), 4)
@@ -392,11 +461,158 @@ async def _stage_run(args) -> int:
     return 0 if passed else 1
 
 
+def _stage_regate(args: argparse.Namespace) -> int:
+    """离线重判门禁（零 LLM 成本）：合并 N 份全量报告 -> κ 均值 / MAD 全过 判定 + 稳定分歧仲裁清单。"""
+    if not args.reports:
+        print("[judge_calibration] --stage regate 需要 --reports A.json,B.json", file=sys.stderr)
+        return 1
+    paths = [Path(p.strip()) for p in args.reports.split(",") if p.strip()]
+    if len(paths) < 2:
+        print("[judge_calibration] --reports 至少给两份全量报告（单轮 κ 受 judge 方差影响，不作门禁）", file=sys.stderr)
+        return 1
+    rounds = []
+    for p in paths:
+        if not p.exists():
+            print(f"[judge_calibration] 报告不存在: {p}", file=sys.stderr)
+            return 1
+        pts = json.loads(p.read_text(encoding="utf-8")).get("points", [])
+        rounds.append((p, pts, _calibration_metrics(pts)))
+
+    if not GOLDEN_PATH.exists():
+        print(f"[judge_calibration] golden 不存在: {GOLDEN_PATH}", file=sys.stderr)
+        return 1
+    gold = {}
+    for line in GOLDEN_PATH.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        o = json.loads(line)
+        gold[o["id"]] = o
+
+    overridden = 0
+    for (p, pts, _) in rounds:
+        for p_point in pts:
+            g = gold.get(p_point["id"])
+            if not g:
+                continue
+            h = g.get("human_answer_relevancy") if p_point["metric"] == "answer_relevancy" else g.get("human_faithfulness")
+            if h is None:
+                continue
+            p_point["human"] = float(h)
+            p_point["delta"] = p_point["judge"] - h
+            p_point["agree"] = abs(p_point["delta"]) <= TOLERANCE
+            overridden += 1
+
+    rounds = [(p, pts, _calibration_metrics(pts)) for (p, pts, _) in rounds]
+
+    print(f"[judge_calibration] human 分以 {GOLDEN_PATH.name} 为准，覆盖报告快照 {overridden} 点", file=sys.stderr)
+
+    mean_kappa = round(statistics.mean(r[2]["kappa"] for r in rounds), 4)
+    max_mad = max(r[2]["mad"] for r in rounds)
+    passed = (mean_kappa >= KAPPA_GATE) and (max_mad <= MAD_GATE)
+
+    base_keys = {(p["id"], p["metric"]) for p in rounds[0][1]}
+    for (_, pts, _) in rounds[1:]:
+        base_keys &= {(p["id"], p["metric"]) for p in pts}
+
+    def _d(pts, k):
+        return next(p for p in pts if p["id"] == k[0] and p["metric"] == k[1])
+
+    stable: list = []
+    flapping: list = []
+    for k in base_keys:
+        diss = [not _d(pts, k)["agree"] for (_, pts, _) in rounds]
+        h = _d(rounds[0][1], k)["human"]
+        jr = [_d(pts, k)["judge"] for (_, pts, _) in rounds]
+        dr = [_d(pts, k)["delta"] for (_, pts, _) in rounds]
+        notes = _d(rounds[0][1], k).get("notes", "")
+        entry = {"id": k[0], "metric": k[1], "human": h, "judge_rounds": jr, "deltas": dr, "notes": notes}
+        if all(diss):
+            stable.append(entry)
+        elif any(diss):
+            flapping.append(entry)
+
+    stable.sort(key=lambda e: (e["metric"], e["id"]))
+    flapping.sort(key=lambda e: (e["metric"], e["id"]))
+
+    ts = time.strftime("%Y%m%d-%H%M%S")
+    REPORT_DIR.mkdir(parents=True, exist_ok=True)
+    json_path = REPORT_DIR / f"judge-regate-{ts}.json"
+    json_path.write_text(
+        json.dumps(
+            {
+                "gate_version": 2,
+                "rounds": [{"report": p.name, "metrics": m} for (p, pts, m) in rounds],
+                "mean_kappa": mean_kappa,
+                "max_mad": max_mad,
+                "kappa_gate": KAPPA_GATE,
+                "mad_gate": MAD_GATE,
+                "band_bounds": list(BAND_BOUNDS),
+                "passed": passed,
+                "stable_disagreements": stable,
+                "flapping_points": flapping,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    md = [
+        "# Judge Regate Report v2（κ 均值 + MAD 多轮门禁，零 LLM 成本）",
+        f"- Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+        f"- 输入报告: {', '.join(str(p) for p in paths)}",
+        "",
+        "| 轮次 | κ | MAD | 点级一致率(参考) | 判定点数 |",
+        "|---|---|---|---|---|",
+    ]
+    for (p, pts, m) in rounds:
+        md.append(f"| {p.name} | {m['kappa']:.4f} | {m['mad']:.4f} | {m['agreement_rate']:.2%} | {m['n']} |")
+    md.append(f"| **均值/最大** | **{mean_kappa:.4f}** | **{max_mad:.4f}** | - | - |")
+    md.append("")
+    md.append("| 门禁 | 读数 | 阈值 | 状态 |")
+    md.append("|---|---|---|---|")
+    md.append(f"| Cohen's κ（均值） | {mean_kappa:.4f} | >= {KAPPA_GATE} | {'**PASS**' if mean_kappa >= KAPPA_GATE else '**FAIL**'} |")
+    md.append(f"| MAD（每轮） | {max_mad:.4f} | <= {MAD_GATE} | {'**PASS**' if max_mad <= MAD_GATE else '**FAIL**'} |")
+    md.append("")
+    md.append(f"**门禁判定：{'PASS' if passed else 'FAIL'}**")
+    md.append("")
+    md.append(f"## 稳定分歧仲裁清单（每轮 |Δ|>{TOLERANCE}，{len(stable)} 点）")
+    md.append("")
+    md.append("> 人工三方对照（judge / 仲裁意见 / golden）：golden 错则修订 golden（版本化留痕）；judge 对则留档为已知边界。")
+    md.append("")
+    md.append("| id | metric | judge 各轮 | human | Δ 各轮 | notes |")
+    md.append("|---|---|---|---|---|---|")
+    for e in stable:
+        jr = "/".join(f"{x:.2f}" for x in e["judge_rounds"])
+        dr = "/".join(f"{x:.2f}" for x in e["deltas"])
+        md.append(f"| {e['id']} | {e['metric']} | {jr} | {e['human']:.2f} | {dr} | {e['notes']} |")
+    md.append("")
+    md.append(f"## 单轮翻面点（judge 方差，不进仲裁，{len(flapping)} 点）")
+    md.append("")
+    for e in flapping:
+        jr = "/".join(f"{x:.2f}" for x in e["judge_rounds"])
+        md.append(f"- {e['id']} ({e['metric']}): judge={jr} human={e['human']:.2f}")
+    md_path = REPORT_DIR / f"judge-regate-{ts}.md"
+    md_path.write_text("\n".join(md), encoding="utf-8")
+
+    print(f"[judge_calibration] regate 报告: {md_path}", file=sys.stderr)
+    print(
+        f"[judge_calibration] κ 均值={mean_kappa:.4f} (gate>={KAPPA_GATE})  MAD 最大={max_mad:.4f} (gate<={MAD_GATE})  稳定分歧 {len(stable)} 点 / 翻面 {len(flapping)} 点 -> {'PASS' if passed else 'FAIL'}",
+        file=sys.stderr,
+    )
+    return passed
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="LLM judge 校准门禁（ARES 式）")
-    parser.add_argument("--stage", choices=["build", "run"], required=True)
+    parser = argparse.ArgumentParser(description="LLM judge 校准门禁 v2（Cohen's κ + MAD 双指标）")
+    parser.add_argument("--stage", default="run", choices=["build", "run", "regate"], help="阶段（默认 run）")
     parser.add_argument("--report", default=None, help="build 阶段源 e2e JSON 报告（默认取最新）")
+    parser.add_argument("--reports", default=None, help="regate 阶段：逗号分隔的多份全量报告路径")
     parser.add_argument("--samples", type=int, default=20, help="build 抽样条数（默认 20）")
+    parser.add_argument("--ids", default=None, help="run 阶段：仅跑指定 id（逗号分隔，大写）")
+    parser.add_argument("--diff-only", default=None, help="run 阶段：仅跑基线报告里不一致点（传基线报告路径）")
+    parser.add_argument("--metrics", default="all", choices=["all", "rel", "faith"], help="run 阶段维度过滤")
     parser.add_argument("--gateway", default="http://localhost:9090/api/sentinel")
     parser.add_argument("--agent", default="http://localhost:8001", help="agent-python 基址（证据源）")
     parser.add_argument("--output", default=str(REPO_ROOT / "evaluation" / "reports"), help="报告目录")
@@ -406,6 +622,8 @@ def main() -> int:
     args = parser.parse_args()
     if args.stage == "build":
         return asyncio.run(_stage_build(args))
+    if args.stage == "regate":
+        return _stage_regate(args)
     return asyncio.run(_stage_run(args))
 
 

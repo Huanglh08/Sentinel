@@ -24,6 +24,7 @@ from core.retrieval.types import RetrievedChunk
 
 _CONTEXT_FORMAT_PATH = "context-format.st"
 _ANSWER_CITATION_RULES_PATH = "answer-citation-rules.st"
+_ANSWER_GROUNDING_RULES_PATH = "answer-grounding-rules.st"
 
 # 1:1 翻译 ragent DefaultContextFormatter.sanitizeAttribute：清洗属性值里会破坏伪标签结构的字符
 _ATTR_SANITIZE_RE = re.compile(r'["<>]')
@@ -387,6 +388,10 @@ class ContextFormatter:
     # ---- 引用规则（独立 section） ----
     def citation_rules(self) -> str:
         return self.loader.render(_ANSWER_CITATION_RULES_PATH)
+
+    # ---- grounding 规则（P1 faithfulness 修复：只依据资料作答、未覆盖明确说明） ----
+    def grounding_rules(self) -> str:
+        return self.loader.render(_ANSWER_GROUNDING_RULES_PATH)
 
     # ---- Evidence body ----
     def format_kb_evidence(self, kb_context: str) -> str:

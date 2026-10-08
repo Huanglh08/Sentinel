@@ -23,7 +23,7 @@ _logger = logging.getLogger(__name__)
 @dataclass
 class MCPConfig:
     transport: str = "sse"
-    sse_url: str = "http://127.0.0.1:8000/sse"
+    sse_url: str = "http://127.0.0.1:8002/sse"
     streamable_url: str = "http://127.0.0.1:9099/mcp"
     stdio_command: list[str] | None = None
     call_timeout_sec: float = 30.0

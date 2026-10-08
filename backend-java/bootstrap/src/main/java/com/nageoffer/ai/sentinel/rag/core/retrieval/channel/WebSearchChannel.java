@@ -48,8 +48,8 @@ import java.util.List;
  * 任何失败（网络异常、非 2xx、响应格式异常、超时）只记录 warn 日志并返回空结果，
  * 绝不让联网检索故障影响本地检索链路
  * <p>
- * 注：mcp-server 的 {@code YouComSearchMcpExecutor} 内含一份并行的 You.com 调用实现，与此处属有意重复——
- * mcp-server 是零内部依赖、可独立部署的服务（与本模块不在同一 JVM、面向不同消费者），抽公共模块会打破其隔离，
+ * 注：Python MCP Server（agent-python/mcp-server-py）内含一份并行的 You.com 调用实现，与此处属有意重复——
+ * 该服务零内部依赖、可独立部署（与本模块不在同一 JVM、面向不同消费者），抽公共模块会打破其隔离，
  * 故按「服务级重复」处理；修改 You.com 契约（端点 / 参数 / 响应结构）时两处需同步
  */
 @Slf4j

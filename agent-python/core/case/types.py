@@ -18,6 +18,7 @@ from datetime import datetime
 CASE_STATUS_OPEN = "OPEN"
 CASE_STATUS_INVESTIGATING = "INVESTIGATING"
 CASE_STATUS_REPORTED = "REPORTED"
+CASE_STATUS_RESOLVED = "RESOLVED"
 CASE_STATUS_CLOSED = "CLOSED"
 
 # 审批待办状态
@@ -32,6 +33,7 @@ ACTION_STATUS_EXECUTED = "EXECUTED"
 AUDIT_OPERATION_APPROVE = "APPROVE"
 AUDIT_OPERATION_REJECT = "REJECT"
 AUDIT_OPERATION_CLOSE = "CLOSE"
+AUDIT_OPERATION_ACTION_EXECUTE = "ACTION_EXECUTE"  # 处置动作自动执行（responder 落地）
 AUDIT_OPERATION_AUTO_APPROVE = "AUTO_APPROVE"  # L1 放权：高置信 benign 自动放行
 AUDIT_OPERATION_KB_DISTILL = "KB_DISTILL"  # 知识库飞轮：报告经验回写候选池
 # Phase 4：L2 置信阈值自动处置（业界依据：Vigil 置信 >=0.90 自动执行遏制，
@@ -59,10 +61,18 @@ SEVERITY_INCONCLUSIVE = "inconclusive"
 
 # L2 自动处置允许的结论档位（benign 走 L1 放行；inconclusive 必须人工）
 L2_SEVERITY_SET = {SEVERITY_SUSPICIOUS, SEVERITY_MALICIOUS}
+
 # 高危动作硬黑名单（不可配置）：命中任一关键词的建议无条件留人工审批。
 # 业界依据：Tracecat 将 falcon.isolate_host 列为敏感动作必须审批 —— 金融风控
 # 误封/误冻的客诉与资金代价高于 SOC 隔离主机，取保守端（Vigil/Tracecat 光谱的保守侧）。
-L2_ACTION_DENYLIST = ("封禁", "冻结", "止付", "清退", "拦截", "拉黑", "关停", "下架")
+# 第四批加入「提现」：资金出口动作一律人工。
+L2_ACTION_DENYLIST = ("封禁", "冻结", "止付", "清退", "拦截", "拉黑", "关停", "下架", "提现")
+
+# 仅通用伴随动作（观察/提醒类）不构成 AUTO_DISPOSE 的锚点词
+GENERIC_ACTION_WORDS = ("观察", "提醒", "通知", "标记")
+
+# 转人工语义动作：字面命中白名单但语义即升级（如「发起人工核查工单」），L2 分支排除
+MANUAL_ACTION_WORDS = ("人工",)
 
 
 @dataclass
@@ -129,6 +139,10 @@ class ApprovalItem:
     status: str = APPROVAL_STATUS_PENDING  # PENDING / APPROVED / REJECTED
     operator: str = ""
     opinion: str = ""
+    # SOAR 双人复核：高危动作（denylist 命中）需两名不同操作人先后裁决
+    first_operator: str = ""
+    first_opinion: str = ""
+    first_decide_time: str = ""
     create_time: str = ""
     update_time: str = ""
 

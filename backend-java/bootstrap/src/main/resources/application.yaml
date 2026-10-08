@@ -15,8 +15,8 @@ spring:
   datasource:
     driver-class-name: org.postgresql.Driver
     type: com.zaxxer.hikari.HikariDataSource
-    username: postgres
-    password: postgres
+    username: ${SENTINEL_DB_USERNAME:postgres}
+    password: ${SENTINEL_DB_PASSWORD:postgres}
     url: jdbc:postgresql://127.0.0.1:5432/sentinel?client_encoding=UTF8
     hikari:
       connection-timeout: 5000
@@ -30,7 +30,7 @@ spring:
     redis:
       host: 127.0.0.1
       port: 6379
-      password: 123456
+      password: ${SENTINEL_REDIS_PASSWORD:123456}
 
 rocketmq:
   name-server: 127.0.0.1:9876
@@ -48,6 +48,7 @@ sentinel:
 rag:
   python:
     base-url: ${SENTINEL_PYTHON_BASE_URL:http://localhost:8001}  # g2 分层：Python agent 服务地址
+    api-key: ${SENTINEL_PYTHON_API_KEY:}  # 服务间认证（与 agent REQUIRE_AUTH 的 API_KEY 同值，勿提交真实 key）
   eval:
     enabled: true  # 开启评测专用接口 /api/sentinel/rag/eval（生产应改回 false）
   storage:
@@ -138,11 +139,6 @@ rag:
       lock-seconds: 900
       batch-size: 20
       min-interval-seconds: 60
-
-  mcp:
-    servers:
-      - name: default
-        url: http://localhost:9099
 
   search:
     # 检索漏斗三段预算，各自独立、单调收窄，启动时校验 recall-budget ≥ default-top-k 且 rerank-candidate-limit ≥ default-top-k

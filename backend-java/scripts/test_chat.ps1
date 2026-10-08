@@ -5,7 +5,7 @@ $body = @{
 } | ConvertTo-Json -Depth 5
 
 try {
-    $r = Invoke-WebRequest -Uri "http://localhost:8000/chat" -Method Post -ContentType "application/json" -Body $body -TimeoutSec 10 -UseBasicParsing
+    $r = Invoke-WebRequest -Uri "http://localhost:8001/chat" -Method Post -ContentType "application/json" -Body $body -TimeoutSec 10 -UseBasicParsing
     Write-Host "status: $($r.StatusCode)"
     Write-Host "body: $($r.Content)"
 } catch {

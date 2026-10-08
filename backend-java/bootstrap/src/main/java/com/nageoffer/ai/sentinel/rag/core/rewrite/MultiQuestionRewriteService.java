@@ -121,7 +121,9 @@ public class MultiQuestionRewriteService implements QueryRewriteService {
                 归一化后：{}
                 改写结果：{}
                 子问题：{}
-                """, originalQuestion, normalizedQuestion, result.rewrittenQuestion(), result.subQuestions());
+                检索查询（含英文变体）：{}
+                """, originalQuestion, normalizedQuestion, result.rewrittenQuestion(),
+                result.subQuestions(), result.retrievalQueries());
         return result;
     }
 
@@ -184,7 +186,16 @@ public class MultiQuestionRewriteService implements QueryRewriteService {
             if (CollUtil.isEmpty(subs)) {
                 subs = List.of(rewrite);
             }
-            return new RewriteResult(rewrite, subs);
+            // P2 跨语言检索（LangChain MultiQueryRetriever 模式）：英文变体仅进入检索，
+            // 用于召回英文原文 OWASP cheatsheet；不进入答案提示词，避免污染作答语言
+            List<String> retrievalQueries = new ArrayList<>(subs);
+            if (obj.has("en_variant") && obj.get("en_variant").isJsonPrimitive()) {
+                String en = obj.get("en_variant").getAsString().trim();
+                if (StrUtil.isNotBlank(en) && subs.stream().noneMatch(s -> s.equalsIgnoreCase(en))) {
+                    retrievalQueries.add(en);
+                }
+            }
+            return new RewriteResult(rewrite, subs, retrievalQueries);
         } catch (Exception e) {
             log.warn("解析改写+拆分结果失败，raw={}", raw, e);
             return null;

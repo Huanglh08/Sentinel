@@ -25,7 +25,14 @@ from datetime import date, datetime, timedelta
 
 from mcp.server.fastmcp import FastMCP
 
-mcp = FastMCP("ragent-mcp-server")
+# ponytail: 依赖版本漂移——pyc 对应的是旧版 mcp（run() 收 host/port）；
+# 当前安装的 mcp SDK 中 FastMCP.__init__ 收 host/port，run() 只收 transport。
+# 故端口须在构造期确定（装饰器 @mcp.tool() 在导入期注册到该实例）。
+_mcp_port = 8000
+if "--port" in sys.argv:
+    _mcp_port = int(sys.argv[sys.argv.index("--port") + 1])
+
+mcp = FastMCP("ragent-mcp-server", host="127.0.0.1", port=_mcp_port)
 
 
 # ---------------------------------------------------------------------------
@@ -642,7 +649,7 @@ if __name__ == "__main__":
     if "--transport" in sys.argv:
         transport = sys.argv[sys.argv.index("--transport") + 1]
     if transport == "sse":
-        # 显式指定 host/port，便于 Java 端 SSE 远程接入（默认 http://127.0.0.1:8000/sse）
-        mcp.run(transport="sse", host="127.0.0.1", port=8000)
+        # host/port 已在构造期写入 mcp 实例，run() 仅指定传输方式
+        mcp.run(transport="sse")
     else:
         mcp.run(transport="stdio")

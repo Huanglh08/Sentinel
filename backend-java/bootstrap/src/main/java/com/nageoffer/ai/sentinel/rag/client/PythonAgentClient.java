@@ -20,6 +20,7 @@ package com.nageoffer.ai.sentinel.rag.client;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.nageoffer.ai.sentinel.framework.context.UserContext;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.HttpUrl;
 import okhttp3.MediaType;
@@ -61,17 +62,20 @@ public class PythonAgentClient {
     private final OkHttpClient streamingHttpClient;
     private final ObjectMapper objectMapper;
     private final String baseUrl;
+    private final String apiKey;
 
     public PythonAgentClient(
             OkHttpClient syncHttpClient,
             OkHttpClient streamingHttpClient,
             ObjectMapper objectMapper,
-            @Value("${rag.python.base-url:http://localhost:8001}") String baseUrl
+            @Value("${rag.python.base-url:http://localhost:8001}") String baseUrl,
+            @Value("${rag.python.api-key:}") String apiKey
     ) {
         this.syncHttpClient = syncHttpClient;
         this.streamingHttpClient = streamingHttpClient;
         this.objectMapper = objectMapper;
         this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
+        this.apiKey = apiKey;
     }
 
     /**
@@ -99,11 +103,11 @@ public class PythonAgentClient {
         body.put("taskId", taskId);
         body.put("knowledgeBaseIds", knowledgeBaseIds == null ? List.of() : knowledgeBaseIds);
         body.put("history", history == null ? List.of() : history);
-        Request request = new Request.Builder()
+        Request request = withUserHeaders(new Request.Builder()
                 .url(url)
                 .post(RequestBody.create(toJson(body), JSON))
                 .header("Accept", "text/event-stream")
-                .build();
+                .build());
 
         CompletableFuture<Void> done = new CompletableFuture<>();
         EventSourceListener listener = new EventSourceListener() {
@@ -238,10 +242,10 @@ public class PythonAgentClient {
      */
     public void stopTask(String taskId) {
         try {
-            Request request = new Request.Builder()
+            Request request = withUserHeaders(new Request.Builder()
                     .url(baseUrl + "/stop/" + java.net.URLEncoder.encode(taskId, java.nio.charset.StandardCharsets.UTF_8))
                     .post(RequestBody.create("", JSON))
-                    .build();
+                    .build());
             try (Response response = syncHttpClient.newCall(request).execute()) {
                 if (!response.isSuccessful()) {
                     log.warn("Python /stop 杩斿洖 HTTP {}", response.code());
@@ -253,11 +257,11 @@ public class PythonAgentClient {
     }
 
     private JsonNode postJson(String path, Map<String, Object> body) throws Exception {
-        Request request = new Request.Builder()
+        Request request = withUserHeaders(new Request.Builder()
                 .url(baseUrl + path)
                 .post(RequestBody.create(toJson(body), JSON))
                 .header("Content-Type", "application/json")
-                .build();
+                .build());
         try (Response response = syncHttpClient.newCall(request).execute()) {
             if (!response.isSuccessful()) {
                 String err = "";
@@ -271,6 +275,57 @@ public class PythonAgentClient {
                 return objectMapper.readTree(text);
             }
         }
+    }
+
+    /**
+     * 通用 JSON 转发（/case 管理面）：method/path/query/body 原样透传到 agent，
+     * 出站自动带 X-API-Key + X-User-* 身份头。调用方负责关闭返回的 Response。
+     */
+    public Response forward(String method, String pathWithQuery, String jsonBody) throws Exception {
+        Request.Builder builder = new Request.Builder().url(baseUrl + pathWithQuery);
+        boolean hasBody = jsonBody != null && !jsonBody.isEmpty();
+        switch (method.toUpperCase()) {
+            case "GET" -> builder.get();
+            case "DELETE" -> builder.delete();
+            case "PUT" -> builder.put(RequestBody.create(hasBody ? jsonBody : "", JSON));
+            default -> builder.post(RequestBody.create(hasBody ? jsonBody : "", JSON));
+        }
+        return syncHttpClient.newCall(withUserHeaders(builder.build())).execute();
+    }
+
+    /**
+     * 流式转发（SSE 调查 / 报告导出）：返回 OkHttp Response，调用方读取
+     * byteStream() 透传给浏览器，读毕关闭 Response。
+     */
+    public Response forwardStream(String method, String pathWithQuery, String jsonBody) throws Exception {
+        Request.Builder builder = new Request.Builder().url(baseUrl + pathWithQuery);
+        if ("GET".equalsIgnoreCase(method)) {
+            builder.get();
+        } else {
+            builder.post(RequestBody.create(jsonBody == null ? "" : jsonBody, JSON));
+        }
+        builder.header("Accept", "text/event-stream");
+        return streamingHttpClient.newCall(withUserHeaders(builder.build())).execute();
+    }
+
+    /**
+     * 出站请求统一注入：X-API-Key（服务间认证）+ X-User-Name/X-User-Role（操作人身份，
+     * 取自网关 UserContext TTL；未登录则不加身份头，agent 侧敏感操作会 403）。
+     */
+    private Request withUserHeaders(Request request) {
+        String username = UserContext.getUsername();
+        String role = UserContext.getRole();
+        Request.Builder builder = request.newBuilder();
+        if (apiKey != null && !apiKey.isBlank()) {
+            builder.header("X-API-Key", apiKey);
+        }
+        if (username != null && !username.isBlank()) {
+            builder.header("X-User-Name", username);
+        }
+        if (role != null && !role.isBlank()) {
+            builder.header("X-User-Role", role);
+        }
+        return builder.build();
     }
 
     private String toJson(Object body) {

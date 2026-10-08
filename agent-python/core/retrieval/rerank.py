@@ -130,7 +130,8 @@ class LLMReranker(Reranker):
             seen = set(order)
             ranked += [c for i, c in enumerate(chunks) if i not in seen]
             return ranked[:top_k] if top_k > 0 else ranked
-        except Exception:
+        except Exception as e:  # noqa: BLE001
+            logger.warning("LLM 重排失败，回退原始顺序: %s", e)
             return chunks[:top_k] if top_k > 0 else chunks
 
 

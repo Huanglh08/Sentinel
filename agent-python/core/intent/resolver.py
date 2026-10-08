@@ -78,7 +78,8 @@ class IntentResolver:
                  {"role": "user", "content": question}],
                 temperature=0.1, top_p=0.3,
             )
-        except LLMError:
+        except LLMError as e:
+            _logger.warning("意图分类 LLM 调用失败，降级为无意图: %s", e)
             return []
         return self._parse_scores(raw)
 
@@ -98,7 +99,8 @@ class IntentResolver:
                 scores.append(NodeScore(node, float(item["score"]), item.get("reason", "")))
             scores.sort(key=lambda s: s.score, reverse=True)
             return [s for s in scores if s.score >= INTENT_MIN_SCORE][:MAX_INTENT_COUNT]
-        except Exception:
+        except Exception as e:  # noqa: BLE001
+            _logger.warning("意图打分结果解析失败，降级为无意图: %s", e)
             return []
 
     # ---- 配额控制：1:1 翻译 ragent IntentResolver.capTotalIntents ----

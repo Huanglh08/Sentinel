@@ -105,6 +105,16 @@ public class RelevanceGatePostProcessor implements SearchResultPostProcessor {
                     ragConfigProperties.getRetrievalGateQwen3Threshold(),
                     verdict.scored, verdict.triggered);
             if (verdict.triggered) {
+                if (Boolean.TRUE.equals(ragConfigProperties.getRetrievalGateSoftLanding())) {
+                    // 软着陆（P2）：不切空，保留 Rerank 后 top-K 交生成层按 grounding 规则验证。
+                    // 对齐 Azure AI Search RAG 模式——检索层不做硬截断，相关性判定留给生成层；
+                    // 生成层在 grounding 规则约束下对未覆盖内容明确说明，避免正样本被误伤（离线校准 12.1%）
+                    int keep = Math.max(1, ragConfigProperties.getRetrievalGateSoftLandingTopK());
+                    List<RetrievedChunk> passed = chunks.size() <= keep ? chunks : chunks.subList(0, keep);
+                    log.warn("相关性门控触发，软着陆保留 top-{} 条（原 {} 条），交生成层验证（题目: {}）",
+                            passed.size(), chunks.size(), abbreviate(context.getMainQuestion()));
+                    return passed;
+                }
                 log.warn("相关性门控触发，切空 {} 条 chunk，走无知识拒答（题目: {}）",
                         chunks.size(), abbreviate(context.getMainQuestion()));
                 return List.of();

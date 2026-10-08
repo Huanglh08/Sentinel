@@ -7,9 +7,12 @@
   - 所有方法吞掉异常（避免缓存失败影响主流程）
 """
 from __future__ import annotations
+import logging
 
 import json
 from typing import Any
+
+_logger = logging.getLogger(__name__)
 
 
 class IntentTreeCacheManager:
@@ -38,7 +41,8 @@ class IntentTreeCacheManager:
             if isinstance(raw, bytes):
                 raw = raw.decode("utf-8")
             return json.loads(raw)
-        except Exception:
+        except Exception as e:  # noqa: BLE001
+            _logger.debug("读取意图树缓存失败，回退空: %s", e)
             return None
 
     def save(self, roots: list[dict[str, Any]]) -> None:
@@ -48,8 +52,8 @@ class IntentTreeCacheManager:
         try:
             payload = json.dumps(roots, ensure_ascii=False)
             self._redis.setex(self.CACHE_KEY, self.CACHE_EXPIRE_SECONDS, payload)
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001
+            _logger.debug("写入意图树缓存失败: %s", e)
 
     def clear(self) -> None:
         """严格对应 ragent clearIntentTreeCache()：增删改时调用。"""
@@ -57,8 +61,8 @@ class IntentTreeCacheManager:
             return
         try:
             self._redis.delete(self.CACHE_KEY)
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001
+            _logger.debug("清除意图树缓存失败: %s", e)
 
     def exists(self) -> bool:
         """严格对应 ragent isCacheExists()。"""
@@ -66,5 +70,6 @@ class IntentTreeCacheManager:
             return False
         try:
             return bool(self._redis.exists(self.CACHE_KEY))
-        except Exception:
+        except Exception as e:  # noqa: BLE001
+            _logger.debug("探测意图树缓存失败: %s", e)
             return False

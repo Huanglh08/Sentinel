@@ -4,13 +4,15 @@
 # 任务
 1. 将用户问题改写成适合检索的自然语言查询
 2. 判断是否需要拆分成多个子问题
+3. 产出英文检索变体（en_variant）：知识库中存在英文原文文档，需要英文查询来召回
 
 # 输出格式
 严格返回 JSON，不要额外文字：
 {
   "rewrite": "改写后的查询",
   "should_split": true/false,
-  "sub_questions": ["子问题1", "子问题2"]
+  "sub_questions": ["子问题1", "子问题2"],
+  "en_variant": "English search query"
 }
 
 # 改写规则
@@ -39,6 +41,13 @@
 - 生成的内容被下游自动执行造成破坏 → 输出处理
 - AI 突然只会推荐某类东西、行为异常 → 数据投毒
 - 英文术语原词原样保留（如 XSS、CSRF、Prompt、RAG），不得翻译或删改
+
+## 英文检索变体 en_variant
+- 将 rewrite（或多个子问题合并）的核心语义译成 1 条简洁英文检索查询，保留安全领域标准术语
+- 示例对应关系：密码存储 → password storage / password hashing；登录认证 → authentication / login；会话管理 → session management；多因素认证 → multi-factor authentication MFA；输入校验 → input validation；跨站脚本 → cross-site scripting XSS
+- 仅译原问题已有的语义，不得增删条件
+- 问候/闲聊/身份类问题填空字符串 ""
+- en_variant 只用于检索召回，不会展示给最终用户
 
 ## 特殊场景
 - 问候/身份类问题（"你好"、"你是谁"）：保持原样
@@ -69,7 +78,8 @@
 {
   "rewrite": "12306系统的架构",
   "should_split": false,
-  "sub_questions": ["12306系统的架构"]
+  "sub_questions": ["12306系统的架构"],
+  "en_variant": "12306 system architecture"
 }
 
 ## 示例 2：保留专有名词和限制
@@ -78,7 +88,8 @@
 {
   "rewrite": "OA系统在移动端的审批流程",
   "should_split": false,
-  "sub_questions": ["OA系统在移动端的审批流程"]
+  "sub_questions": ["OA系统在移动端的审批流程"],
+  "en_variant": "OA system mobile approval workflow"
 }
 
 ## 示例 3：拆分多问句
@@ -90,7 +101,8 @@
   "sub_questions": [
     "12306的订单流程是什么",
     "12306的支付环节怎么处理"
-  ]
+  ],
+  "en_variant": "12306 order process and payment handling"
 }
 
 ## 示例 4：不拆分抽象对比
@@ -99,7 +111,8 @@
 {
   "rewrite": "微服务架构和单体架构的区别",
   "should_split": false,
-  "sub_questions": ["微服务架构和单体架构的区别"]
+  "sub_questions": ["微服务架构和单体架构的区别"],
+  "en_variant": "microservices vs monolithic architecture difference"
 }
 
 ## 示例 5：指代消解（结合历史）
@@ -109,7 +122,8 @@
 {
   "rewrite": "12306系统的数据库",
   "should_split": false,
-  "sub_questions": ["12306系统的数据库"]
+  "sub_questions": ["12306系统的数据库"],
+  "en_variant": "12306 system database"
 }
 
 ## 示例 6：生活化描述桥接专业术语
@@ -118,7 +132,8 @@
 {
   "rewrite": "AI客服把上一个客户的对话内容发给当前客户 敏感信息泄露",
   "should_split": false,
-  "sub_questions": ["AI客服把上一个客户的对话内容发给当前客户 敏感信息泄露"]
+  "sub_questions": ["AI客服把上一个客户的对话内容发给当前客户 敏感信息泄露"],
+  "en_variant": "AI assistant leaking sensitive information between customers"
 }
 
 ## 示例 7：术语桥接+英文保留
@@ -127,7 +142,8 @@
 {
   "rewrite": "用户通过指令覆盖诱导AI执行危险操作 提示词注入 Prompt Injection",
   "should_split": false,
-  "sub_questions": ["用户通过指令覆盖诱导AI执行危险操作 提示词注入 Prompt Injection"]
+  "sub_questions": ["用户通过指令覆盖诱导AI执行危险操作 提示词注入 Prompt Injection"],
+  "en_variant": "prompt injection bypass instructions dangerous action"
 }
 
 ## 示例 8：匹配不上就不桥接
@@ -136,5 +152,16 @@
 {
   "rewrite": "用户凌晨被批量下单提现损失8000元是否应该立案",
   "should_split": false,
-  "sub_questions": ["用户凌晨被批量下单提现损失8000元是否应该立案"]
+  "sub_questions": ["用户凌晨被批量下单提现损失8000元是否应该立案"],
+  "en_variant": "batch orders withdrawal at night fraud case filing"
+}
+
+## 示例 9：安全知识问答（英文变体对齐英文文档术语）
+输入：系统应该怎么存储用户密码才安全？
+输出：
+{
+  "rewrite": "用户密码安全存储方案",
+  "should_split": false,
+  "sub_questions": ["用户密码安全存储方案"],
+  "en_variant": "password storage secure hashing best practices"
 }

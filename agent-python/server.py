@@ -32,8 +32,9 @@ from core.case.notify import notify_approval_decided
 from core.case.patrol import CasePatroller
 from core.case.responder import CaseResponder
 from core.case.rule_miner import RuleMiner
-from core.case.store import CaseStore
+from core.case.store import CaseStore, get_risk_policy, save_risk_policy
 from core.case.types import (
+    AUDIT_OPERATION_ACTION_EXECUTE,
     AUDIT_OPERATION_APPROVE,
     AUDIT_OPERATION_REJECT,
     AUDIT_OPERATION_RULE_APPROVED,
@@ -935,6 +936,48 @@ class ApprovalDecideRequest(BaseModel):
     opinion: str = Field(default="", max_length=1024)
 
 
+class RiskPolicyRequest(BaseModel):
+    """P2 风险策略更新请求（L2 自动处置 + 双人复核分级共用）。"""
+
+    l2_autopilot_enabled: bool
+    l2_confidence: float = Field(ge=0, le=1)
+    l2_action_whitelist: list[str] = Field(min_length=1)
+    l2_action_denylist: list[str] = Field(min_length=1)
+
+
+@app.get("/case/risk-policy")
+async def get_case_risk_policy(request: Request, user=Depends(get_current_user)):
+    """读取 L2 风险策略（登录即可读，供前端策略卡片展示）。"""
+    _get_case_agent(request)
+    operator = _case_operator(user)
+    if not operator:
+        raise HTTPException(status_code=403, detail="无法确定操作人身份")
+    return get_risk_policy()
+
+
+@app.put("/case/risk-policy")
+async def put_case_risk_policy(payload: RiskPolicyRequest, request: Request, user=Depends(get_current_user)):
+    """更新 L2 风险策略（P2 配置化）：仅管理员；白/黑名单非空校验（fail-closed）。"""
+    _get_case_agent(request)
+    operator = _case_operator(user)
+    if not operator:
+        raise HTTPException(status_code=403, detail="无法确定操作人身份，拒绝敏感操作")
+    roles = getattr(user, "roles", None) or []
+    if roles and str(roles[0]).lower() != "admin":
+        raise HTTPException(status_code=403, detail="仅管理员可修改风险策略")
+    whitelist = [w.strip() for w in payload.l2_action_whitelist if w.strip()]
+    denylist = [w.strip() for w in payload.l2_action_denylist if w.strip()]
+    if not whitelist or not denylist:
+        raise HTTPException(status_code=400, detail="白/黑名单不能为空")
+    return save_risk_policy(
+        enabled=payload.l2_autopilot_enabled,
+        confidence=payload.l2_confidence,
+        whitelist=whitelist,
+        denylist=denylist,
+        operator=operator,
+    )
+
+
 @app.get("/case/approvals")
 async def approval_list(
     request: Request,
@@ -952,7 +995,8 @@ async def approval_list(
     return {
         "approvals": case_agent.store.list_approvals(
             case_id=case_id, status=status, limit=min(max(limit, 1), 200)
-        )
+        ),
+        "stats": case_agent.store.approval_stats(case_id=case_id),
     }
 
 
@@ -963,17 +1007,32 @@ async def approval_decide(
     """审批裁决：APPROVED / REJECTED。
 
     - 重复裁决幂等返回当前状态（不重复落处置/审计/通知）
-    - 首次裁决（P3-1/P3-2/P3-4）：写审计日志；APPROVED 自动落处置动作记录；
-      推送 IM 裁决结果
+    - 高危动作（命中 L2_ACTION_DENYLIST，如冻结）权限分层复核（C10 R4/R5）：
+      第一次 APPROVED 仅记一级确认（pending_second=True，状态保持 PENDING，任意角色），
+      由管理员（role=admin）终审 APPROVED 才触发执行；REJECTED 一票即否决
+    - 终态裁决（P3-1/P3-2/P3-4）：写审计日志；APPROVED 自动落处置动作记录；
+      执行成功（EXECUTED）推进案件 RESOLVED；推送 IM 裁决结果
     """
     case_agent = _get_case_agent(request)
-    operator = _require_case_operator(user)
-    result = case_agent.store.decide_approval(
-        approval_id, status=payload.decision, operator=operator, opinion=payload.opinion
-    )
+    operator = _case_operator(user)
+    if not operator:
+        raise HTTPException(status_code=403, detail="无法确定操作人身份，拒绝敏感操作")
+    roles = getattr(user, "roles", None) or []
+    operator_role = str(roles[0]) if roles else ""
+    try:
+        result = case_agent.store.decide_approval(
+            approval_id,
+            status=payload.decision,
+            operator=operator,
+            opinion=payload.opinion,
+            operator_role=operator_role,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if result is None:
         raise HTTPException(status_code=404, detail="approval not found")
     first_time = bool(result.pop("first_time", False))
+    pending_second = bool(result.pop("pending_second", False))
     if first_time:
         operation = (
             AUDIT_OPERATION_APPROVE if payload.decision == "APPROVED" else AUDIT_OPERATION_REJECT
@@ -988,7 +1047,14 @@ async def approval_decide(
         )
         if payload.decision == "APPROVED":
             # P3 Responder：审批通过后受控执行（online 真调用 / offline 留痕）
-            item = {"action": result.get("action", ""), "reason": result.get("reason", "")}
+            case_rec = case_agent.store.get_case(result.get("case_id", "")) or {}
+            item = {
+                "action": result.get("action", ""),
+                "reason": result.get("reason", ""),
+                "approval_id": approval_id,
+                "operator": operator,
+                "subject_id": str(case_rec.get("subject_id", "")),
+            }
             outcome = await _get_case_responder(request).execute(item, result)
             case_agent.store.create_actions(
                 result.get("case_id", ""),
@@ -998,11 +1064,31 @@ async def approval_decide(
                     {
                         "action": item["action"],
                         "detail": f"{item['reason']}｜{outcome['detail']}",
+                        "status": outcome.get("status", "EXECUTED"),
                     }
                 ],
                 operator=operator,
             )
+            case_agent.store.record_audit(
+                case_id=result.get("case_id", ""),
+                approval_id=approval_id,
+                operation=AUDIT_OPERATION_ACTION_EXECUTE,
+                target=approval_id,
+                operator=operator,
+                detail=f"{outcome.get('mode', '')}｜{outcome.get('status', '')}｜{outcome.get('detail', '')[:300]}",
+            )
+            if outcome.get("status") == "EXECUTED":
+                case_agent.store.mark_case_resolved(result.get("case_id", ""))
         notify_approval_decided(result, payload.decision, operator, payload.opinion)
+    elif pending_second:
+        case_agent.store.record_audit(
+            case_id=result.get("case_id", ""),
+            approval_id=approval_id,
+            operation=AUDIT_OPERATION_APPROVE,
+            target=approval_id,
+            operator=operator,
+            detail=f"一级通过（待二级复核）{result.get('action', '')}｜意见: {payload.opinion[:100]}",
+        )
     return result
 
 
@@ -1323,8 +1409,8 @@ async def chat(payload: ChatRequest, request: Request, user=Depends(get_current_
             if ticket_holder:
                 try:
                     ticket_holder[0].release()
-                except Exception:
-                    pass
+                except Exception as e:  # noqa: BLE001
+                    _logger.debug("释放并发许可失败: %s", e)
 
     return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
@@ -1475,7 +1561,9 @@ async def debug_retrieval(request: Request, question: str = "", payload: SearchR
             prev = seen.get(c.id)
             if prev is None or c.score > prev.score:
                 seen[c.id] = c
-    chunks = sorted(seen.values(), key=lambda c: -c.score)[:6]
+    # 诊断口径对齐生产：final 窗口 = budget.context_top_k（生产生成上下文条数），
+    # 不得再截小，否则 judge 证据窄于生成上下文会造出伪"未支撑"判定。
+    chunks = sorted(seen.values(), key=lambda c: -c.score)[: budget.context_top_k]
     total_ms = (time.perf_counter() - started) * 1000.0
     # metadata jsonb 缺 doc_name 时 pgvector 召回回退 str(doc_id)；此处回表补真实文档名
     # ponytail: 逐条查询 O(n)，诊断端点 n=6 可接受；生产链路应由入库时写全 metadata 解决

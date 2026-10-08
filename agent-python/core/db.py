@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 
 _logger = logging.getLogger("sentinel.db")
 
@@ -61,3 +62,30 @@ def close_pool() -> None:
             if _pool is not None:
                 _pool.close()
                 _pool = None
+
+
+_hidden_cache: tuple[float, list[str]] = (0.0, [])
+
+
+def hidden_collections(ttl_s: int = 60) -> list[str]:
+    """返回对普通用户隐藏（visible_to_user=0）的 collection 名列表。
+
+    60s TTL 缓存；查询失败沿用旧缓存（首次失败返回空 = fail-open：
+    ponytail — DB 不可用时 pgvector 检索本身也不可用，不再加独立降级分支）。
+    """
+    global _hidden_cache
+    ts, cached = _hidden_cache
+    now = time.monotonic()
+    if now - ts < ttl_s:
+        return cached
+    try:
+        with get_pool().connection() as conn:
+            rows = conn.execute(
+                "SELECT collection_name FROM t_knowledge_base WHERE visible_to_user = 0 AND deleted = 0"
+            ).fetchall()
+        result = [r[0] for r in rows]
+        _hidden_cache = (now, result)
+        return result
+    except Exception as e:
+        _logger.warning("hidden_collections 查询失败，沿用旧缓存: %s", e)
+        return cached

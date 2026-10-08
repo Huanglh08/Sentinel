@@ -668,9 +668,20 @@ def main() -> int:
     parser.add_argument("--no-judge", action="store_true", help="跳过 LLM judge（仅确定性判定）")
     parser.add_argument("--runs", type=int, default=1, help="重复运行次数（>1 时输出均值±标准差与稳定失败判定）")
     parser.add_argument("--name", default="e2e", help="报告名前缀")
+    parser.add_argument("--category", default="", help="按 seed category 子串过滤（逗号分隔多个），空=全部")
+    parser.add_argument("--docs", default="", help="按 expected_doc_ids 子串过滤（逗号分隔多个），空=全部")
+    parser.add_argument("--limit", type=int, default=0, help="仅取前 N 条，0=不限")
     args = parser.parse_args()
 
     seeds = load_seeds(Path(args.seed))
+    cats = [c.strip() for c in args.category.split(",") if c.strip()]
+    docs = [d.strip() for d in args.docs.split(",") if d.strip()]
+    if cats:
+        seeds = [s for s in seeds if any(c in (s.category or "") for c in cats)]
+    if docs:
+        seeds = [s for s in seeds if any(d in doc for doc in s.expected_doc_ids for d in docs)]
+    if args.limit > 0:
+        seeds = seeds[: args.limit]
     print(f"[e2e_eval] 加载 {len(seeds)} 条 seed from {args.seed}", file=sys.stderr)
 
     judge: JudgeClient | None = None

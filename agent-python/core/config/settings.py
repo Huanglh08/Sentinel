@@ -1,5 +1,6 @@
 """Service boundary settings, previously lived in core/config.py (shadowed by the package)."""
 from __future__ import annotations
+import logging
 
 import os
 import threading
@@ -9,6 +10,8 @@ from typing import Any
 import httpx
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_logger = logging.getLogger(__name__)
 
 
 class AppSettings(BaseSettings):
@@ -81,8 +84,8 @@ class NacosConfigClient(ConfigurationClient):
             if time.monotonic() - self._last_load > self._ttl_s:
                 try:
                     self._cache = self._fetch()
-                except Exception:
-                    pass
+                except Exception as e:  # noqa: BLE001
+                    _logger.warning("配置中心拉取失败，沿用上次缓存: %s", e)
                 self._last_load = time.monotonic()
 
     def get(self, key, default=None):

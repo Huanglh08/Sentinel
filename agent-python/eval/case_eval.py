@@ -1,7 +1,7 @@
 """案件调查链路评测（P2 调查评测集上线）。
 
 读取 seed-case.jsonl,对每条 clue 调用
-    POST http://localhost:8000/case/investigate   (SSE)
+    POST http://localhost:8001/case/investigate   (SSE)
 先 POST /auth/login 换 token。解析事件流:
     phase(start/done) / case.created / step / report / approval.created /
     l1.autopass / end(tta/ttr/steps/forced_stop_reason) / error
@@ -21,7 +21,7 @@
 运行:
     python -m eval.case_eval --username admin --password admin
 或:
-    python -m eval.case_eval --base http://localhost:8000 \
+    python -m eval.case_eval --base http://localhost:8001 \
         --seed eval/data/seed-case.jsonl --output eval/reports
 """
 from __future__ import annotations

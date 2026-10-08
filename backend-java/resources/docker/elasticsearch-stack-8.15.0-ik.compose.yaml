@@ -1,0 +1,35 @@
+name: elasticsearch-stack
+
+# Sentinel 关键词检索引擎：Elasticsearch 8.15.0 + IK 中文分词（ik_max_word / ik_smart）
+# 首次使用需先构建镜像（compose 检测到镜像缺失时会自动用下方 build 段构建）：
+#   cd resources/docker-es && docker build -t sentinel-es:8.15.0-ik .
+# 启动：docker compose -f elasticsearch-stack-8.15.0-ik.compose.yaml up -d
+# 注意：若需迁移旧实例的索引数据，使用 resources/docker-es/migrate_es.py + snapshot.ndjson
+
+services:
+  elasticsearch:
+    container_name: elasticsearch
+    image: sentinel-es:8.15.0-ik
+    build:
+      context: ../../../resources/docker-es
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 20s
+      start_period: 60s
+      retries: 5
+
+volumes:
+  esdata:
+
+networks:
+  default:
+    name: es-net

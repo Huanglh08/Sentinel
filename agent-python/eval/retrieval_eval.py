@@ -79,6 +79,7 @@ class RetrievalCaseResult:
     hit_at_5: bool
     reciprocal_rank: float
     latency_ms: float
+    rewritten_query: str = ""
     error: str | None = None
 
 
@@ -212,6 +213,24 @@ async def _eval_one(
     body = data.get("data") if isinstance(data.get("data"), dict) else data
     # 兼容字段(后端用 camelCase)
     retrieved = body.get("retrievedDocIds") or body.get("retrieved_doc_ids") or []
+    # MRR 口径修正：/debug/retrieval 的 retrievedDocIds 是 sorted set（无序），
+    # 排名信息必须取 final chunks（按 score 降序）剥后缀的保序 doc 序列
+    ordered: list[str] = []
+    final_chunks = body.get("final") or []
+    if isinstance(final_chunks, list) and final_chunks:
+        for c in final_chunks:
+            name = ""
+            if isinstance(c, dict):
+                name = str(c.get("doc_name") or "")
+            else:
+                name = str(getattr(c, "doc_name", "") or "")
+            if name:
+                ordered.append(name.rsplit(".", 1)[0] if name.rfind(".") > 0 else name)
+    seen_set: set[str] = set()
+    ordered = [d for d in ordered if not (d in seen_set or seen_set.add(d))]
+    if ordered:
+        retrieved = ordered
+    rewritten = str(body.get("rewritten_query") or "")
 
     recall, hit, rr = _score_case(case.expected_doc_ids, list(retrieved), k=5)
     return RetrievalCaseResult(
@@ -224,6 +243,7 @@ async def _eval_one(
         hit_at_5=hit,
         reciprocal_rank=round(rr, 4),
         latency_ms=round(latency, 2),
+        rewritten_query=rewritten,
         error=None,
     )
 
@@ -321,12 +341,31 @@ def main() -> int:
     parser.add_argument("--password", default="admin", help="网关登录密码")
     parser.add_argument(
         "--rewrite",
+        dest="rewrite",
         action="store_true",
-        help="评测前先过 QueryRewriter（对齐生产链路口径，每条 +1 次 LLM 调用）",
+        default=True,
+        help="评测前先过 QueryRewriter（对齐生产链路口径，每条 +1 次 LLM 调用；默认开启）",
     )
+    parser.add_argument(
+        "--no-rewrite",
+        dest="rewrite",
+        action="store_false",
+        help="关闭改写（原句直检，仅用于对照实验）",
+    )
+    parser.add_argument("--category", default="", help="按 seed category 子串过滤（逗号分隔多个），空=全部")
+    parser.add_argument("--docs", default="", help="按 expected_doc_ids 子串过滤（逗号分隔多个），空=全部")
+    parser.add_argument("--limit", type=int, default=0, help="仅取前 N 条，0=不限")
     args = parser.parse_args()
 
     seeds = load_seeds(Path(args.seed))
+    cats = [c.strip() for c in args.category.split(",") if c.strip()]
+    docs = [d.strip() for d in args.docs.split(",") if d.strip()]
+    if cats:
+        seeds = [s for s in seeds if any(c in (s.category or "") for c in cats)]
+    if docs:
+        seeds = [s for s in seeds if any(d in doc for doc in s.expected_doc_ids for d in docs)]
+    if args.limit > 0:
+        seeds = seeds[: args.limit]
     print(f"[retrieval_eval] 加载 {len(seeds)} 条 seed from {args.seed}", file=sys.stderr)
 
     summary = asyncio.run(

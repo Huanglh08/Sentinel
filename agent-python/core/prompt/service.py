@@ -138,6 +138,12 @@ class RAGPromptService:
         if plan.base_template is None:
             return ""
         body = cleanup_prompt(plan.base_template)
+        if has_kb:
+            # P1 faithfulness 修复：grounding 强制规则独立于 citation 开关——
+            # 凡有 KB 资料都必须遵守（对齐 Anthropic/Azure RAG 反幻觉指南）
+            grounding = self.formatter.grounding_rules()
+            if grounding:
+                body = body + "\n\n" + grounding
         if has_kb and self.citation_enabled:
             rules = self.formatter.citation_rules()
             if rules:

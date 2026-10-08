@@ -147,7 +147,7 @@ async def main_async(args: argparse.Namespace) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Evaluate RAG search/chat endpoints.")
-    parser.add_argument("--base-url", default="http://127.0.0.1:8000")
+    parser.add_argument("--base-url", default="http://127.0.0.1:8001")
     parser.add_argument("--cases", required=True)
     parser.add_argument("--top-k", type=int, default=6)
     parser.add_argument("--timeout", type=float, default=120.0)

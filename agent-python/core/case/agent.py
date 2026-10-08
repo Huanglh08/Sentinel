@@ -27,13 +27,14 @@ from collections import Counter
 from typing import AsyncIterator
 
 from core.case.skills import SkillLoader
-from core.case.store import CaseStore
+from core.case.store import CaseStore, get_risk_policy
 from core.case.notify import notify_approval_created
 from core.case.types import (
     AUDIT_OPERATION_AUTO_APPROVE,
     AUDIT_OPERATION_L2_AUTO_APPROVE,
-    L2_ACTION_DENYLIST,
+    GENERIC_ACTION_WORDS,
     L2_SEVERITY_SET,
+    MANUAL_ACTION_WORDS,
     PHASE_INVESTIGATE,
     PHASE_REPORT,
     PHASE_TRIAGE,
@@ -404,27 +405,41 @@ class CaseInvestigationAgent:
             report_dict.pop("raw", None)  # raw 仅供落库审计，不下发 SSE 前端
             yield {"type": "report", "report": report_dict}
 
-            # ---------- ④ 审批闭环 / L2 自动处置 / L1 放权 ----------
-            # 有人工待办 -> 落审批 + IM 推送；无待办 ->
-            #   L2: 高置信恶意/可疑 + 低危动作白名单 -> 受控自动执行（默认关闭）
-            #   L1: 高置信 benign -> 自动放行留痕
-            pending = [
+            # ---------- ④ 自主决策分流（deny_hit 一票否决前置 + 白名单子集自动执行）----------
+            # denylist 命中 -> 整案人工（一票否决，不做任何自动执行）；否则按
+            # 结论/置信/白名单分流：自动子集走 L1(benign)/L2(suspicious+malicious)
+            # 执行器，人工子集落审批待办。两通道并行，互不阻塞。
+            policy = get_risk_policy()
+            recs = [
                 r
                 for r in report.recommendations
-                if isinstance(r, dict) and r.get("requires_human_approval")
+                if isinstance(r, dict) and r.get("action")
             ]
+            deny_hit = any(
+                kw in str(r["action"])
+                for r in recs
+                for kw in policy["l2_action_denylist"]
+            )
+            if deny_hit:
+                auto_recs, pending = [], recs
+            else:
+                auto_recs, pending = self._split_auto(report, recs, policy)
+            approvals: list[dict] = []
             if pending:
                 approvals = self.store.create_approvals(case_id, case["case_no"], pending)
                 notify_approval_created(approvals, case.get("case_no", ""))
+            l2_actions: list[dict] = []
+            l1_actions: list[dict] = []
+            if auto_recs and report.conclusion in L2_SEVERITY_SET:
+                l2_actions = await self._l2_autopilot(case_id, case, report, auto_recs)
+            elif auto_recs:
+                l1_actions = self._l1_autopass(case_id, case, report, auto_recs)
+            if approvals:
                 yield {"type": "approval.created", "approvals": approvals}
-            else:
-                l2_actions = await self._l2_autopilot(case_id, case, report)
-                if l2_actions:
-                    yield {"type": "l2.autopilot", "actions": l2_actions}
-                else:
-                    l1_actions = self._l1_autopass(case_id, case, report)
-                    if l1_actions:
-                        yield {"type": "l1.autopass", "actions": l1_actions}
+            if l2_actions:
+                yield {"type": "l2.autopilot", "actions": l2_actions}
+            elif l1_actions:
+                yield {"type": "l1.autopass", "actions": l1_actions}
 
             yield {
                 "type": "end",
@@ -440,31 +455,72 @@ class CaseInvestigationAgent:
             yield {"type": "error", "message": f"{type(e).__name__}: {e}"}
 
     # ------------------------------------------------------------------
-    # L1 放权（Phase 3）：高置信 benign 且无人工待办时自动放行并全程留痕
+    # ④ 自主决策分流：把建议拆成（自动子集, 人工子集），白名单是唯一确定性闸门
     # ------------------------------------------------------------------
-    def _l1_autopass(self, case_id: str, case: dict, report: InvestigationReport) -> list[dict]:
-        """触发条件（全部满足）:
-        - CASE_L1_AUTOPILOT 未关闭（默认开启）
-        - conclusion=benign 且 confidence >= CASE_L1_CONFIDENCE（默认 0.85）
-        - 存在免审处置建议（放行/观察类）
-        效果：落 EXECUTED 处置记录（operator=L1:auto）+ 审计留痕，不产生人工待办。
+    def _split_auto(
+        self, report: InvestigationReport, recs: list[dict], policy: dict
+    ) -> tuple[list[dict], list[dict]]:
+        """按结论/置信/白名单把建议分流为（自动子集, 人工子集）。
+
+        白名单是唯一确定性闸门（不信任 LLM 自评 requires_human_approval，与 L2 同原则）；
+        denylist 已由编排层前置排除（高危整案人工）。两通道并行：自动子集走 L1/L2
+        执行器，人工子集落审批待办，互不阻塞 —— 混合案不被单一人工建议整案卡死。
         """
         if os.getenv("CASE_L1_AUTOPILOT", "1").strip().lower() in {"0", "false", "off"}:
-            return []
+            return [], recs
         try:
-            threshold = float(os.getenv("CASE_L1_CONFIDENCE", "0.85"))
+            l1_threshold = float(os.getenv("CASE_L1_CONFIDENCE", "0.85"))
         except ValueError:
-            threshold = 0.85
-        if report.conclusion != SEVERITY_BENIGN or report.confidence < threshold:
-            return []
+            l1_threshold = 0.85
+        if report.conclusion == SEVERITY_BENIGN and report.confidence >= l1_threshold:
+            # L1: 高置信 benign -> 环境变量白名单（默认放行/观察类低危动作）
+            wl = tuple(
+                kw.strip()
+                for kw in os.getenv("CASE_L1_ACTION_WHITELIST", "放行,观察,提醒,通知,标记").split(",")
+                if kw.strip()
+            )
+        elif (
+            report.conclusion in L2_SEVERITY_SET
+            and policy["l2_autopilot_enabled"]
+            and report.confidence >= float(policy["l2_confidence"])
+        ):
+            wl = tuple(policy["l2_action_whitelist"])
+            # L2 处置深度锚点：剔除通用伴随动作与转人工语义词，剩余才算真实处置词
+            disposal = tuple(
+                w
+                for w in wl
+                if w not in GENERIC_ACTION_WORDS
+                and not any(m in w for m in MANUAL_ACTION_WORDS)
+            )
+            if not any(
+                any(kw in str(r["action"]) for kw in disposal)
+                and not any(m in str(r["action"]) for m in MANUAL_ACTION_WORDS)
+                for r in recs
+            ):
+                return [], recs
+        else:
+            return [], recs
         auto = [
-            r
-            for r in report.recommendations
-            if isinstance(r, dict) and r.get("action") and not r.get("requires_human_approval")
+            r for r in recs
+            if any(kw in str(r["action"]) for kw in wl)
+            and (
+                report.conclusion == SEVERITY_BENIGN
+                or not any(m in str(r["action"]) for m in MANUAL_ACTION_WORDS)
+            )
         ]
-        if not auto:
-            return []
-        actions = self.store.create_actions(case_id, case.get("case_no", ""), "", auto, operator="L1:auto")
+        return auto, [r for r in recs if r not in auto]
+
+    # ------------------------------------------------------------------
+    # L1 放权执行器（benign 子集已由 _split_auto 判定通过，这里只执行+留痕）
+    # ------------------------------------------------------------------
+    def _l1_autopass(
+        self, case_id: str, case: dict, report: InvestigationReport, recs: list[dict]
+    ) -> list[dict]:
+        """执行 _split_auto 分流的 benign 自动子集（白名单动作已判定通过），
+        落 EXECUTED 处置记录（operator=L1:auto）+ 审计留痕。
+        """
+        threshold = float(os.getenv("CASE_L1_CONFIDENCE", "0.85"))
+        actions = self.store.create_actions(case_id, case.get("case_no", ""), "", recs, operator="L1:auto")
         self.store.record_audit(
             case_id=case_id,
             operation=AUDIT_OPERATION_AUTO_APPROVE,
@@ -479,50 +535,20 @@ class CaseInvestigationAgent:
         return actions
 
     # ------------------------------------------------------------------
-    # L2 置信阈值自动处置（Phase 4）：置信阈值 x 确定性动作白名单 双闸门
-    # 业界依据（evaluation/reports）: Vigil 置信 >=0.90 自动执行遏制；
-    # HolmesGPT approval_required_tools / Tracecat 敏感动作必须审批 ——
-    # 动作分级必须是确定性配置（白/黑名单），不信任 LLM 自评。
+    # L2 自动处置执行器（suspicious/malicious 子集已由 _split_auto 判定通过）
     # ------------------------------------------------------------------
-    async def _l2_autopilot(self, case_id: str, case: dict, report: InvestigationReport) -> list[dict]:
-        """触发条件（全部满足；默认关闭，放权从小步开始）:
-        - CASE_L2_AUTOPILOT 开启（默认关闭）
-        - conclusion ∈ {suspicious, malicious} 且 confidence >= CASE_L2_CONFIDENCE（默认 0.90, 对齐 Vigil）
-        - 无任何 requires_human_approval 待办（调用侧保证：pending 为空才进入）
-        - 无任何建议命中 L2_ACTION_DENYLIST 硬黑名单（封禁/冻结/止付等无条件人工）
-        - 每条建议动作均命中 CASE_L2_ACTION_WHITELIST 白名单关键词
+    async def _l2_autopilot(
+        self, case_id: str, case: dict, report: InvestigationReport, recs: list[dict]
+    ) -> list[dict]:
+        """执行 _split_auto 分流的 suspicious/malicious 自动子集
+        （autopilot 开/置信/白名单已由 _split_auto 判定，denylist 已由编排层排除）。
         效果：经 Responder 受控执行（TOOL_BINDING 为空时全 OFFLINE 留痕），
         落处置记录（operator=L2:auto）+ 审计 L2_AUTO_APPROVE。
         """
-        if os.getenv("CASE_L2_AUTOPILOT", "0").strip().lower() not in {"1", "true", "on"}:
-            return []
         if self.responder is None:
             return []
-        try:
-            threshold = float(os.getenv("CASE_L2_CONFIDENCE", "0.90"))
-        except ValueError:
-            threshold = 0.90
-        if report.conclusion not in L2_SEVERITY_SET or report.confidence < threshold:
-            return []
-        actions = [
-            r for r in report.recommendations if isinstance(r, dict) and r.get("action")
-        ]
-        if not actions:
-            return []
-        # 硬黑名单优先：任何建议命中黑名单 -> 整案放弃自动处置（不产生副作用）
-        for r in actions:
-            if any(kw in str(r["action"]) for kw in L2_ACTION_DENYLIST):
-                return []
-        whitelist = {
-            w.strip()
-            for w in os.getenv("CASE_L2_ACTION_WHITELIST", "观察,提醒,工单,通知,标记,升级").split(",")
-            if w.strip()
-        }
-        for r in actions:
-            if not any(kw in str(r["action"]) for kw in whitelist):
-                return []
         results: list[dict] = []
-        for r in actions:
+        for r in recs:
             try:
                 outcome = await self.responder.execute(r, case)
             except Exception as e:  # noqa: BLE001
@@ -550,7 +576,7 @@ class CaseInvestigationAgent:
             operator="L2:auto",
             detail=(
                 f"L2 自动处置: conclusion={report.conclusion}, "
-                f"confidence={report.confidence:.2f}>={threshold}, 动作={len(results)}条"
+                f"confidence={report.confidence:.2f}, 动作={len(results)}条"
             ),
         )
         logger.info("[case] L2 自动处置生效 case=%s 动作=%d 条", case.get("case_no", ""), len(results))
@@ -575,6 +601,7 @@ class CaseInvestigationAgent:
                     }
                 ],
                 max_tokens=500,
+                temperature=0.0,  # 决策链贪婪解码：消除 run 间采样方差（第四批门禁）
             )
         except Exception as e:  # noqa: BLE001
             logger.warning("[case] 分诊调用失败，使用默认分诊: %s", e)
@@ -656,7 +683,7 @@ class CaseInvestigationAgent:
             if time.monotonic() > deadline:
                 forced_stop_reason = "总时长超限"
                 break
-            raw = await self.llm.chat(messages, max_tokens=600)
+            raw = await self.llm.chat(messages, max_tokens=600, temperature=0.0)
             action = _extract_json(raw)
             if action is None:
                 step = EvidenceStep(
@@ -779,7 +806,9 @@ class CaseInvestigationAgent:
         raw = ""
         for attempt in range(2):
             try:
-                raw = await self.llm.chat([{"role": "user", "content": base}], max_tokens=900)
+                raw = await self.llm.chat(
+                    [{"role": "user", "content": base}], max_tokens=900, temperature=0.0
+                )
             except Exception as e:  # noqa: BLE001
                 logger.warning("[case] 报告调用失败: %s", e)
                 break

@@ -53,19 +53,29 @@ public class IntentResolver {
         List<String> subQuestions = CollUtil.isNotEmpty(rewriteResult.subQuestions())
                 ? rewriteResult.subQuestions()
                 : List.of(rewriteResult.rewrittenQuestion());
-        List<CompletableFuture<SubQuestionIntent>> tasks = subQuestions.stream()
-                .map(q -> CompletableFuture.supplyAsync(
-                        () -> {
-                            try {
-                                return new SubQuestionIntent(q, classifyIntents(q));
-                            } catch (Exception e) {
-                                log.error("子问题意图分类失败，降级为空意图，question：{}", q, e);
-                                return new SubQuestionIntent(q, List.of());
-                            }
-                        },
-                        intentClassifyExecutor
-                ))
-                .toList();
+        // P2 跨语言检索：retrievalQueries = subQuestions + [英文变体]；
+        // 尾部多出的查询仅参与检索召回，不进入答案提示词
+        List<String> retrievalQueries = CollUtil.isNotEmpty(rewriteResult.retrievalQueries())
+                ? rewriteResult.retrievalQueries()
+                : subQuestions;
+        int answerVisibleCount = Math.min(subQuestions.size(), retrievalQueries.size());
+
+        List<CompletableFuture<SubQuestionIntent>> tasks = new ArrayList<>();
+        for (int i = 0; i < retrievalQueries.size(); i++) {
+            final String q = retrievalQueries.get(i);
+            final boolean retrievalOnly = i >= answerVisibleCount;
+            tasks.add(CompletableFuture.supplyAsync(
+                    () -> {
+                        try {
+                            return new SubQuestionIntent(q, classifyIntents(q), retrievalOnly);
+                        } catch (Exception e) {
+                            log.error("子问题意图分类失败，降级为空意图，question：{}", q, e);
+                            return new SubQuestionIntent(q, List.of(), retrievalOnly);
+                        }
+                    },
+                    intentClassifyExecutor
+            ));
+        }
         List<SubQuestionIntent> subIntents = tasks.stream()
                 .map(CompletableFuture::join)
                 .toList();
@@ -216,7 +226,7 @@ public class IntentResolver {
         for (int i = 0; i < originalSubIntents.size(); i++) {
             SubQuestionIntent original = originalSubIntents.get(i);
             List<NodeScore> retained = groupedByIndex.getOrDefault(i, List.of());
-            result.add(new SubQuestionIntent(original.subQuestion(), retained));
+            result.add(new SubQuestionIntent(original.subQuestion(), retained, original.retrievalOnly()));
         }
         return result;
     }

@@ -24,8 +24,16 @@ import com.nageoffer.ai.sentinel.rag.core.intent.NodeScore;
 /**
  * 子问题与其意图候选
  *
- * @param subQuestion 子问题文本
- * @param nodeScores  子问题的意图候选
+ * @param subQuestion   子问题文本
+ * @param nodeScores    子问题的意图候选
+ * @param retrievalOnly 仅参与检索、不进入答案提示词（P2 跨语言检索：英文变体查询）
  */
-public record SubQuestionIntent(String subQuestion, List<NodeScore> nodeScores) {
+public record SubQuestionIntent(String subQuestion, List<NodeScore> nodeScores, boolean retrievalOnly) {
+
+    /**
+     * 兼容旧调用：默认参与答案提示词
+     */
+    public SubQuestionIntent(String subQuestion, List<NodeScore> nodeScores) {
+        this(subQuestion, nodeScores, false);
+    }
 }

@@ -121,4 +121,20 @@ public class RAGConfigProperties {
      */
     @Value("${rag.retrieval-gate.top-n:8}")
     private Integer retrievalGateTopN;
+
+    /**
+     * 门控触发后的处置模式（P2 软着陆，对齐 Azure AI Search "检索宽进、生成层验证" 模式）
+     * <p>
+     * true：触发时不再切空，保留 top-K chunk 交由生成层按 grounding 规则
+     * 判定"资料未覆盖则明确说明"——消除切空对正样本的误伤（离线校准 12.1%）。
+     * false：切空检索结果走无知识拒答（旧行为）。
+     */
+    @Value("${rag.retrieval-gate.soft-landing:true}")
+    private Boolean retrievalGateSoftLanding;
+
+    /**
+     * 软着陆模式下保留的最大 chunk 数（取 Rerank 后前 N 条，弱相关垃圾不全部透传）
+     */
+    @Value("${rag.retrieval-gate.soft-landing-top-k:5}")
+    private Integer retrievalGateSoftLandingTopK;
 }

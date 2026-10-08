@@ -93,8 +93,6 @@ public class EvalController {
                 .retrievedChunkIds(chunkIds)
                 .retrievedContexts(contexts)
                 .retrievedContextDocIds(contextDocIds)
-                .mcpContext(rc == null ? null : rc.getMcpContext())
-                .hasMcp(rc != null && rc.hasMcp())
                 .hasKb(rc != null && rc.hasKb())
                 .subIntents(extractSubIntents(subIntents))
                 .intentLeafIds(extractTopLeafIds(subIntents))

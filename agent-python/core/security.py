@@ -78,9 +78,19 @@ async def get_current_user(
     security: SecurityService = Depends(get_security_service),
 ) -> UserContext:
     if not security.enabled:
+        # 匿名模式读网关注入的身份头构建 UserContext（信任边界=内网网关，公网必须 JWT）。
+        name = (request.headers.get("X-User-Name") or "").strip()
+        if name:
+            role = (request.headers.get("X-User-Role") or "").strip()
+            return UserContext(sub=name, roles=[role] if role else [])
         return UserContext(sub="anonymous")
 
     if api_key and security.verify_api_key(api_key):
+        # API Key 持有者同样透传身份头（信任边界=key 持有者，无身份头退 sub=api-key）。
+        name = (request.headers.get("X-User-Name") or "").strip()
+        if name:
+            role = (request.headers.get("X-User-Role") or "").strip()
+            return UserContext(sub=name, roles=[role] if role else [])
         return UserContext(sub="api-key")
 
     if credentials and credentials.scheme.lower() == "bearer":

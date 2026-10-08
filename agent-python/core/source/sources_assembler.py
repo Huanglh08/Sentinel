@@ -9,11 +9,14 @@
     保证 doc_name 字段非空，行为等价 ragent MetadataEnrichmentPostProcessor 之后的形态）
 """
 from __future__ import annotations
+import logging
 
 from dataclasses import dataclass, field
 from typing import Any
 
 from core.retrieval.types import RetrievedChunk
+
+_logger = logging.getLogger(__name__)
 
 
 EXCERPT_MAX_LENGTH = 100  # 严格对齐 ragent SourcesAssembler.EXCERPT_MAX_LENGTH
@@ -114,6 +117,7 @@ class SourcesAssembler:
                 v = getter(doc_id)
                 if isinstance(v, dict):
                     return v
-        except Exception:
+        except Exception as e:  # noqa: BLE001
+            _logger.debug("解析文档元信息失败: %s", e)
             return {}
         return {}

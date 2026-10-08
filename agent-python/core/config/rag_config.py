@@ -16,9 +16,12 @@
 **接口 1:1**，加载机制 pydantic-settings 后置（D3 进一步工作）
 """
 from __future__ import annotations
+import logging
 
 import os
 from dataclasses import dataclass, field
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -64,6 +67,7 @@ class RAGConfigProperties:
             try:
                 return float(raw)
             except ValueError:
+                _logger.warning("环境变量 %s 取值非法(%r)，回退默认 %s", name, raw, default)
                 return default
 
         def _int(name: str, default: int) -> int:
@@ -73,6 +77,7 @@ class RAGConfigProperties:
             try:
                 return int(raw)
             except ValueError:
+                _logger.warning("环境变量 %s 取值非法(%r)，回退默认 %s", name, raw, default)
                 return default
 
         return cls(

@@ -19,6 +19,19 @@ package com.nageoffer.ai.sentinel.rag.core.rewrite;
 
 import java.util.List;
 
-public record RewriteResult(String rewrittenQuestion, List<String> subQuestions) {
+/**
+ * 问题改写结果
+ *
+ * @param rewrittenQuestion 改写后的主问题
+ * @param subQuestions      子问题列表（进入检索与答案提示词）
+ * @param retrievalQueries  仅检索用查询列表（P2 跨语言：含英文变体；默认等于 subQuestions）
+ */
+public record RewriteResult(String rewrittenQuestion, List<String> subQuestions, List<String> retrievalQueries) {
 
+    /**
+     * 兼容旧调用：检索查询与子问题相同
+     */
+    public RewriteResult(String rewrittenQuestion, List<String> subQuestions) {
+        this(rewrittenQuestion, subQuestions, subQuestions);
+    }
 }

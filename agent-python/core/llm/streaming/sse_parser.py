@@ -5,9 +5,12 @@
   - extractDelta(chunk)：从 chunk.choices[0].delta.content 提取增量文本
 """
 from __future__ import annotations
+import logging
 
 import json
 from typing import Any
+
+_logger = logging.getLogger(__name__)
 
 
 class OpenAIStyleSseParser:
@@ -71,7 +74,8 @@ class OpenAIStyleSseParser:
             delta = choices[0].get("delta", {})
             r = delta.get("reasoning_content")
             return r if r else None
-        except Exception:
+        except Exception as e:  # noqa: BLE001
+            _logger.debug("SSE chunk 推理内容解析失败: %s", e)
             return None
 
     @staticmethod
@@ -81,5 +85,6 @@ class OpenAIStyleSseParser:
             if not choices:
                 return False
             return bool(choices[0].get("finish_reason"))
-        except Exception:
+        except Exception as e:  # noqa: BLE001
+            _logger.debug("SSE chunk 完成标记解析失败: %s", e)
             return False

@@ -30,6 +30,7 @@ from dataclasses import asdict
 from typing import AsyncIterator
 
 from core.config import RAGConfigProperties, SearchChannelProperties
+from core.db import hidden_collections as _hidden_collections
 from core.llm import LLMClient
 from core.intent import IntentResolver, NodeScore, SubQuestionIntent, IntentGuidanceService, IntentKind
 from core.rewrite import QueryRewriter
@@ -116,6 +117,10 @@ class Agent:
         cancelled: threading.Event | None = scope.get("_cancelled")
         # TTFT 五段归因（Langfuse span 模型的轻量自建版，不引 SDK）：提前塞引用，
         # 各段完成即填；中途短路（拒答/澄清/引导）路径带部分 breakdown 返回
+        user_role = str(scope.get("user_role") or "").strip().lower()
+        hidden = set() if user_role == "admin" else set(_hidden_collections())
+        # P1 知识库可见性：非 admin 用户按 hidden 集合过滤检索范围（见第 4 步）
+
         _ttft: dict = {"rewrite_ms": None, "intent_ms": None, "retrieve_ms": None,
                        "rerank_ms": None, "gate_ms": None, "llm_first_ms": None}
         scope["_ttft_breakdown"] = _ttft
@@ -204,15 +209,25 @@ class Agent:
         # 4) KB 检索作用域：1:1 翻译 ragent RetrievalScopeResolver.resolve
         #    顶层一次解析（跨子查询取 topScore），同时 per_sub_query 拿到每个 sq 的 scope
         sub_query_to_scores = [(si.question, list(si.node_scores)) for si in sub_intents]
-        kb_top_scope: RetrievalScope = self.scope_resolver.resolve(sub_query_to_scores)
-        per_sq_scopes: list[tuple[str, RetrievalScope]] = self.scope_resolver.per_sub_query(
+        scope_resolver = self.scope_resolver
+        if hidden:
+            # 并发安全：不就地改共享实例，非 admin 用户每次请求新建过滤后的 resolver
+            scope_resolver = RetrievalScopeResolver(
+                active_collections=[
+                    c for c in self._active_collections if c not in hidden
+                ],
+                confidence_threshold=self.scope_resolver.confidence_threshold,
+                min_intent_score=self.scope_resolver.min_intent_score,
+            )
+        kb_top_scope: RetrievalScope = scope_resolver.resolve(sub_query_to_scores)
+        per_sq_scopes: list[tuple[str, RetrievalScope]] = scope_resolver.per_sub_query(
             sub_query_to_scores
         )
 
         # 用户显式 knowledge_base_ids 时，强制覆盖 scope.collections
         # 1:1 翻译 ragent user_explicit_knowledge_base_ids 分支
         if knowledge_base_ids:
-            explicit = [c for c in knowledge_base_ids if c]
+            explicit = [c for c in knowledge_base_ids if c and c not in hidden]
             if explicit:
                 shared = RetrievalScope(
                     mode="INTENT",
@@ -421,8 +436,8 @@ class Agent:
             profile = AgentProfile.get_default()
             if profile and profile.system_prompt:
                 return profile.system_prompt
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001
+            _logger.warning("读取默认 AgentProfile 失败，回退内置系统提示词: %s", e)
         return "你是一个智能助手，请根据用户问题提供准确、有帮助的回答。"
 
     async def generate_title(self, question: str) -> str:
@@ -435,8 +450,8 @@ class Agent:
             title = (resp or "").strip().strip("。").strip("\n")
             if title:
                 return title[:40]
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001
+            _logger.debug("生成会话标题失败，回退问题截断: %s", e)
         return question[:30] if question else "新对话"
 
     async def recommend_questions(self, question: str, answer: str, chunks: list[dict]) -> list[str]:
@@ -453,7 +468,8 @@ class Agent:
             ], max_tokens=200)
             lines = [ln.strip("0123456789.、- ").strip() for ln in (resp or "").splitlines()]
             return [ln for ln in lines if ln][:3]
-        except Exception:
+        except Exception as e:  # noqa: BLE001
+            _logger.debug("生成推荐追问失败，返回空列表: %s", e)
             return []
 
     async def summarize(self, messages: list[dict], existing_summary: str) -> str:
@@ -467,5 +483,6 @@ class Agent:
                 {"role": "user", "content": prompt},
             ], max_tokens=300)
             return (resp or "").strip()
-        except Exception:
+        except Exception as e:  # noqa: BLE001
+            _logger.warning("生成会话摘要失败，保留原摘要: %s", e)
             return existing_summary

@@ -10,9 +10,12 @@
       或 RAGConfigProperties.activeCollections 读），行为等价
 """
 from __future__ import annotations
+import logging
 
 import os
 from typing import Callable
+
+_logger = logging.getLogger(__name__)
 
 
 _KbCollectionSource = Callable[[], list[str]]
@@ -31,7 +34,8 @@ def _default_source() -> list[str]:
         from core.config.rag_config import RAGConfigProperties
         active = (RAGConfigProperties().active_collections or [])
         return [s for s in active if s and s.strip()]
-    except Exception:
+    except Exception as e:  # noqa: BLE001
+        _logger.debug("读取 active collections 失败，回退空列表: %s", e)
         return []
 
 

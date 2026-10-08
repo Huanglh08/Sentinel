@@ -91,6 +91,10 @@ class RetrievalConfig:
     gate_bge_threshold: float = 0.10
     gate_qwen3_threshold: float = 0.20
     gate_top_n: int = 8
+    # P2 软着陆（Azure "检索宽进、生成层验证" 模式）：触发时保留 top-K 交生成层
+    # 按 grounding 规则验证，消除切空对正样本的误伤（离线校准 12.1%）；False 回退旧行为
+    gate_soft_landing: bool = True
+    gate_soft_landing_top_k: int = 5
 
     @classmethod
     def default(cls) -> "RetrievalConfig":
@@ -380,6 +384,17 @@ class RelevanceGatePostProcessor:
             "复用rerank" if bge_top1 is not None else "独立打分",
         )
         if gate_result.triggered:
+            if self.config.gate_soft_landing:
+                # P2 软着陆：不切空，保留 Rerank 后 top-K 交生成层按 grounding 规则验证。
+                # 对齐 Azure AI Search RAG 模式——检索层不做硬截断，相关性判定留给生成层；
+                # 生成层在 grounding 规则约束下对未覆盖内容明确说明，避免正样本被误伤
+                keep = max(1, self.config.gate_soft_landing_top_k)
+                passed = chunks[:keep]
+                _logger.warning(
+                    "相关性门控触发，软着陆保留 top-%d 条（原 %d 条），交生成层验证（题目: %s）",
+                    keep, len(chunks), context.main_question[:50],
+                )
+                return passed
             _logger.warning(
                 "相关性门控触发，切空 %d 条 chunk，走无知识拒答（题目: %s）",
                 len(chunks), context.main_question[:50],

@@ -29,7 +29,8 @@ import logging
 import re
 
 from core.case.agent import _extract_json
-from core.case.types import AUDIT_OPERATION_RULE_MINED, L2_ACTION_DENYLIST
+from core.case.store import get_risk_policy
+from core.case.types import AUDIT_OPERATION_RULE_MINED
 from core.guard.indirect import sanitize_report_text, wrap_kb_context
 
 logger = logging.getLogger(__name__)
@@ -135,8 +136,10 @@ class RuleMiner:
             action = str(r.get("action_suggestion", "")).strip()
             if not cond or not action:
                 continue
-            # 护栏：高危动作不得入规则（prompt 纪律 + 代码二次校验）
-            if any(kw in action for kw in L2_ACTION_DENYLIST):
+            # 护栏：高危动作不得入规则（prompt 纪律 + 代码二次校验，读 DB 策略保持同步）
+            if any(
+                kw in action for kw in get_risk_policy()["l2_action_denylist"]
+            ):
                 deny_hits.append(action[:40])
                 continue
             # clamp 到 [0,1]：LLM 可能输出越界值（如 1.5）或非数值（如 "high"），

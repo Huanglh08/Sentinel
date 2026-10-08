@@ -17,12 +17,15 @@ v2 增强（multiturn 治理，2026-09-01）：
   - 澄清判定仅在历史注入后仍无法补全时触发，完备问题必须 clarify=false
 """
 from __future__ import annotations
+import logging
 
 import json
 import re
 from dataclasses import dataclass, field
 
 from core.llm import LLMClient, LLMError
+
+_logger = logging.getLogger(__name__)
 
 PROMPT = """你是一个查询理解与重构助手。请结合对话历史（如有），将用户的输入转换为更利于向量检索的检索查询，并拆分为多个子问题。
 
@@ -81,10 +84,12 @@ class QueryRewriter:
                 temperature=0.3, top_p=0.6,
             )
             return self._parse(raw, question)
-        except LLMError:
+        except LLMError as e:
+            _logger.warning("查询改写 LLM 调用失败，回退原问题: %s", e)
             return RewriteResult(queries=[question])
-        except Exception:
+        except Exception as e:  # noqa: BLE001
             # JSON 解析等异常也降级
+            _logger.debug("查询改写结果处理失败，回退原问题: %s", e)
             return RewriteResult(queries=[question])
 
     def _messages(self, question: str, history: list[dict] | None) -> list[dict]:
@@ -114,8 +119,8 @@ class QueryRewriter:
                 return RewriteResult(queries=queries, clarify=True, clarify_question=cq)
             if queries:
                 return RewriteResult(queries=queries)
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001
+            _logger.debug("改写结果 JSON 解析失败，回退规则拆分: %s", e)
         return RewriteResult(queries=self._rule_split(fallback))
 
     @staticmethod

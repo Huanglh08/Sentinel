@@ -196,22 +196,50 @@ def render_retrieval_report(
             lines.append(f"| {i} | {c.question.replace('|', chr(92) + '|')} | {(c.error or '')[:120]} |")
         lines.append("")
 
-    misses = [c for c in summary.cases if c.error is None and not c.hit_at_5]
-    lines.append("## 3. Missed Cases (top5 未命中任一标注文档)")
+    # 正例未命中（真实漏检）与负例分开列：负例标注为空集，本就不参与 Recall/MRR/HitRate
+    misses_pos = [
+        c for c in summary.cases
+        if c.error is None and not c.hit_at_5 and c.expected_doc_ids
+    ]
+    lines.append("## 3. Missed Positive Cases (正例 top5 未命中任一标注文档)")
     lines.append("")
-    if not misses:
-        lines.append("_全部命中,无遗漏。_")
+    if not misses_pos:
+        lines.append("_全部正例命中,无遗漏。_")
     else:
-        lines.append(f"共 **{len(misses)}** 条未命中。")
+        lines.append(f"共 **{len(misses_pos)}** 条正例未命中（影响 Recall/MRR/HitRate）。")
         lines.append("")
-        lines.append("| # | Category | Question | Expected | Top-5 Retrieved |")
-        lines.append("|---|---|---|---|---|")
-        for i, c in enumerate(misses, 1):
+        lines.append("| # | Category | Question | 改写后查询 | Expected | Top-5 Retrieved |")
+        lines.append("|---|---|---|---|---|---|")
+        for i, c in enumerate(misses_pos, 1):
             exp = " / ".join(c.expected_doc_ids) or "-"
+            got = " / ".join(c.top5_doc_ids) or "_(空)_"
+            rw = (getattr(c, "rewritten_query", "") or "").replace("|", "/").replace("\n", " ")[:60]
+            lines.append(
+                f"| {i} | {c.category} | {c.question.replace('|', chr(92) + '|')} "
+                f"| {rw} | `{exp}` | `{got.replace('|', chr(92) + '|')}` |"
+            )
+    lines.append("")
+
+    misses_neg = [
+        c for c in summary.cases
+        if c.error is None and not c.hit_at_5 and not c.expected_doc_ids
+    ]
+    lines.append("## 4. Negative Samples (负例,期望空检索)")
+    lines.append("")
+    if not misses_neg:
+        lines.append("_负例全部正确空检索。_")
+    else:
+        lines.append(
+            f"共 **{len(misses_neg)}** 条负例返回了结果（计入负样本过度检索率,不影响正例指标）。"
+        )
+        lines.append("")
+        lines.append("| # | Category | Question | Top-5 Retrieved |")
+        lines.append("|---|---|---|---|")
+        for i, c in enumerate(misses_neg, 1):
             got = " / ".join(c.top5_doc_ids) or "_(空)_"
             lines.append(
                 f"| {i} | {c.category} | {c.question.replace('|', chr(92) + '|')} "
-                f"| `{exp}` | `{got.replace('|', chr(92) + '|')}` |"
+                f"| `{got.replace('|', chr(92) + '|')}` |"
             )
     lines.append("")
     return "\n".join(lines)

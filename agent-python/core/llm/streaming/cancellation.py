@@ -6,10 +6,13 @@
   - noop()：空操作句柄（拒绝兜底时返回）
 """
 from __future__ import annotations
+import logging
 
 import threading
 from abc import ABC, abstractmethod
 from typing import Callable
+
+_logger = logging.getLogger(__name__)
 
 
 class StreamCancellationHandle(ABC):
@@ -47,8 +50,8 @@ class _HttpCallHandle(StreamCancellationHandle):
             self._cancelled.set()
             try:
                 self._call()
-            except Exception:
-                pass
+            except Exception as e:  # noqa: BLE001
+                _logger.debug("流取消回调执行失败: %s", e)
 
 
 class _NoopHandle(StreamCancellationHandle):

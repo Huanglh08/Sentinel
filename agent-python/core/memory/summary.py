@@ -271,7 +271,8 @@ def _render_summary_wrapper(content: str) -> str:
         from core.prompt.template_loader import render_section
 
         return render_section("context-format.st", "summary-wrapper", {"content": content})
-    except Exception:
+    except Exception as e:  # noqa: BLE001
+        _logger.debug("摘要模板渲染失败，回退纯文本格式: %s", e)
         return f"[历史摘要]\n{content}"
 
 

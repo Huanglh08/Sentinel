@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import time
 from datetime import datetime
 
 from core.case.types import (
@@ -20,6 +22,8 @@ from core.case.types import (
     CASE_STATUS_CLOSED,
     CASE_STATUS_INVESTIGATING,
     CASE_STATUS_REPORTED,
+    CASE_STATUS_RESOLVED,
+    L2_ACTION_DENYLIST,
     RULE_STATUS_APPROVED,
     RULE_STATUS_PENDING,
     RULE_STATUS_REJECTED,
@@ -39,6 +43,97 @@ _CASE_COLS = (
     "clue_summary, raw_input, triage, report, user_id, source, fingerprint, tta_ms, ttr_ms, "
     "create_by, create_time, update_time"
 )
+
+_APPROVAL_COLS = (
+    "id", "case_id", "case_no", "action", "reason", "status", "operator", "opinion",
+    "first_operator", "first_opinion", "first_decide_time", "create_time", "update_time",
+)
+
+
+_RISK_POLICY_TTL_S = 30
+_risk_policy_cache: tuple[float, dict | None] = (0.0, None)
+
+
+def _split_keywords(raw: str) -> list[str]:
+    return [w.strip() for w in (raw or "").split(",") if w.strip()]
+
+
+def _policy_defaults() -> dict:
+    """出厂默认 = 上线前现状（CASE_L2_* env + L2_ACTION_DENYLIST 硬编码）。"""
+    try:
+        conf = float(os.getenv("CASE_L2_CONFIDENCE", "0.90"))
+    except ValueError:
+        conf = 0.9
+    return {
+        "l2_autopilot_enabled": os.getenv("CASE_L2_AUTOPILOT", "0").strip().lower() in {"1", "true", "on"},
+        "l2_confidence": conf,
+        "l2_action_whitelist": _split_keywords(
+            os.getenv(
+                "CASE_L2_ACTION_WHITELIST",
+                "观察,提醒,工单,通知,标记,升级,放行,解除,限制",
+            )
+        ),
+        "l2_action_denylist": list(L2_ACTION_DENYLIST),
+        "updated_by": "system",
+        "update_time": "",
+    }
+
+
+def get_risk_policy(ttl_s: int = _RISK_POLICY_TTL_S) -> dict:
+    """读取 L2 风险策略；ttl_s=0 绕缓存。DB 失败沿用旧值/出厂默认。"""
+    global _risk_policy_cache
+    ts, cached = _risk_policy_cache
+    now = time.monotonic()
+    if now - ts < ttl_s and cached is not None:
+        return cached
+    try:
+        with get_pool().connection() as conn:
+            row = conn.execute(
+                "SELECT l2_autopilot_enabled, l2_confidence, l2_action_whitelist, "
+                "l2_action_denylist, updated_by, update_time FROM t_risk_policy WHERE id = 1"
+            ).fetchone()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[case] t_risk_policy 读取失败，降级出厂默认: %s", e)
+        return cached if cached is not None else _policy_defaults()
+    if row:
+        policy = {
+            "l2_autopilot_enabled": bool(row[0]),
+            "l2_confidence": float(row[1]),
+            "l2_action_whitelist": _split_keywords(row[2]),
+            "l2_action_denylist": _split_keywords(row[3]),
+            "updated_by": row[4] or "system",
+            "update_time": str(row[5]) if row[5] else "",
+        }
+    else:
+        policy = _policy_defaults()
+    _risk_policy_cache = (now, policy)
+    return policy
+
+
+def save_risk_policy(
+    enabled: bool,
+    confidence: float,
+    whitelist: list[str],
+    denylist: list[str],
+    operator: str,
+) -> dict:
+    """更新策略并失效缓存，返回最新值。"""
+    global _risk_policy_cache
+    with get_pool().connection() as conn:
+        conn.execute(
+            "UPDATE t_risk_policy SET l2_autopilot_enabled = %s, l2_confidence = %s, "
+            "l2_action_whitelist = %s, l2_action_denylist = %s, updated_by = %s, "
+            "update_time = CURRENT_TIMESTAMP WHERE id = 1",
+            (1 if enabled else 0, confidence, ",".join(whitelist), ",".join(denylist), operator),
+        )
+        conn.commit()
+    _risk_policy_cache = (0.0, None)
+    return get_risk_policy(ttl_s=0)
+
+
+def _needs_second_approval(action: str) -> bool:
+    """高危动作（命中硬黑名单，如冻结/封禁）需双人复核（C10 手册 R4/R5）。"""
+    return any(k in (action or "") for k in get_risk_policy()["l2_action_denylist"])
 
 
 class CaseStore:
@@ -378,8 +473,9 @@ class CaseStore:
             try:
                 with get_pool().connection() as conn, conn.cursor() as cur:
                     sql = (
-                        "SELECT id, case_id, case_no, action, reason, status, operator, "
-                        "opinion, create_time, update_time FROM t_case_approval WHERE 1=1"
+                        "SELECT id, case_id, case_no, action, reason, status, operator, opinion, "
+                        "first_operator, first_opinion, first_decide_time, create_time, update_time "
+                        "FROM t_case_approval WHERE 1=1"
                     )
                     params: list = []
                     if case_id:
@@ -391,11 +487,11 @@ class CaseStore:
                     sql += " ORDER BY create_time DESC LIMIT %s"
                     params.append(limit)
                     cur.execute(sql, tuple(params))
-                    cols = (
-                        "id", "case_id", "case_no", "action", "reason", "status",
-                        "operator", "opinion", "create_time", "update_time",
-                    )
-                    return [dict(zip(cols, r)) for r in cur.fetchall()]
+                    rows = [
+                        dict(zip(_APPROVAL_COLS, r))
+                        for r in cur.fetchall()
+                    ]
+                return rows
             except Exception:  # noqa: BLE001
                 logger.exception("[case] 审批列表查询失败")
         rows = sorted(
@@ -409,66 +505,226 @@ class CaseStore:
             rows = [a for a in rows if a.get("status") == status]
         return [dict(a) for a in rows[:limit]]
 
-    def decide_approval(
-        self, approval_id: str, *, status: str, operator: str = "", opinion: str = ""
-    ) -> dict | None:
-        """审批裁决（APPROVED / REJECTED）。
+    def approval_stats(self, case_id: str | None = None) -> dict:
+        """审批两率（ROADMAP #13，EU AI Act Art.14 4(b) automation bias 监控口径）：
 
-        返回 dict 额外携带 first_time 标记：
-        - True：本次为首次裁决（PENDING -> 目标状态），上层可触发处置/审计/通知
-        - False：重复裁决，幂等返回当前现状，上层应提示而非重复执行
+        - rejection_rate：终态审批中 REJECTED 占比（人工否决率，autopilot 落审批前的基线带）
+        - admin_override_rate：一级已批的高危审批被终审否决的占比（admin 推翻率）
+        分母为 0 时该率为 None（区分"无样本"与"0%"）。
+        """
+        from core.case.types import (
+            APPROVAL_STATUS_APPROVED,
+            APPROVAL_STATUS_REJECTED,
+        )
+
+        def _assemble(
+            approved: int,
+            rejected: int,
+            pending: int,
+            first_confirmed: int,
+            admin_overridden: int,
+        ) -> dict:
+            final_total = approved + rejected
+            return {
+                "total": final_total + pending,
+                "approved": approved,
+                "rejected": rejected,
+                "pending": pending,
+                "first_confirmed": first_confirmed,
+                "admin_overridden": admin_overridden,
+                "rejection_rate": round(rejected / final_total, 4) if final_total else None,
+                "admin_override_rate": round(admin_overridden / first_confirmed, 4) if first_confirmed else None,
+            }
+
+        if self.enabled:
+            try:
+                with get_pool().connection() as conn, conn.cursor() as cur:
+                    sql = (
+                        "SELECT COUNT(*) FILTER (WHERE status='APPROVED'), COUNT(*) FILTER (WHERE status='REJECTED'), COUNT(*) FILTER (WHERE status='PENDING'), COUNT(*) FILTER (WHERE first_operator IS NOT NULL AND first_operator<>''), COUNT(*) FILTER (WHERE status='REJECTED'   AND first_operator IS NOT NULL AND first_operator<>'') FROM t_case_approval"
+                    )
+                    params = []
+                    if case_id:
+                        sql += " WHERE case_id=%s"
+                        params.append(case_id)
+                    cur.execute(sql, tuple(params))
+                    row = cur.fetchone() or (0, 0, 0, 0, 0)
+                    return _assemble(*(int(x) for x in row))
+            except Exception:  # noqa: BLE001
+                logger.exception("[case] 审批统计查询失败（降级内存）")
+        rows = [a for a in self._mem_approvals.values() if not case_id or a.get("case_id") == case_id]
+        return _assemble(
+            sum(1 for a in rows if a.get("status") == APPROVAL_STATUS_APPROVED),
+            sum(1 for a in rows if a.get("status") == APPROVAL_STATUS_REJECTED),
+            sum(1 for a in rows if a.get("status") == APPROVAL_STATUS_PENDING),
+            sum(1 for a in rows if a.get("first_operator")),
+            sum(1 for a in rows if a.get("status") == APPROVAL_STATUS_REJECTED and a.get("first_operator")),
+        )
+
+    def decide_approval(
+        self,
+        approval_id: str,
+        *,
+        status: str,
+        operator: str = "",
+        opinion: str = "",
+        operator_role: str = "",
+    ) -> dict | None:
+        """审批裁决（APPROVED / REJECTED），高危动作权限分层复核（C10 R4/R5）。
+
+        返回 dict 额外携带 first_time / pending_second 标记：
+        - first_time=True：本次裁决使审批落为终态（PENDING -> 目标状态），
+          上层才执行处置/审计/通知；False 为重复裁决，幂等返回现状；
+        - pending_second=True：高危动作一级已批（记 first_*，状态保持 PENDING），
+          待管理员（admin）终审再次 APPROVED；REJECTED 一票即否决终态。
+        终审（二级复核）要求 operator_role == admin：user 只能一级确认申请；
+        admin 可自批（共机单管理员场景，审批语义 = 权限分层 + 留痕）。
+        角色缺失（operator_role 为空）视为无法判定身份，拒绝终审（fail-closed）。
         """
         from core.case.types import APPROVAL_STATUS_APPROVED, APPROVAL_STATUS_REJECTED
 
         if status not in (APPROVAL_STATUS_APPROVED, APPROVAL_STATUS_REJECTED):
             raise ValueError(f"非法审批状态: {status}")
         now = self._now()
+
+        def _flags(item: dict, first_time: bool, pending_second: bool) -> dict:
+            item["first_time"] = first_time
+            item["pending_second"] = pending_second
+            return item
+
         if self.enabled:
             try:
                 with get_pool().connection() as conn, conn.cursor() as cur:
                     cur.execute(
-                        "UPDATE t_case_approval SET status=%s, operator=%s, opinion=%s, "
-                        "update_time=%s WHERE id=%s AND status=%s",
-                        (status, operator, opinion, now, approval_id, APPROVAL_STATUS_PENDING),
-                    )
-                    first_time = cur.rowcount > 0
-                    cur.execute(
-                        "SELECT id, case_id, case_no, action, reason, status, operator, "
-                        "opinion, create_time, update_time FROM t_case_approval WHERE id=%s",
+                        "SELECT id, case_id, case_no, action, reason, status, operator, opinion, "
+                        "first_operator, first_opinion, first_decide_time, create_time, update_time "
+                        "FROM t_case_approval WHERE id=%s",
                         (approval_id,),
                     )
                     row = cur.fetchone()
                     if not row:
                         return None
-                    cols = (
-                        "id", "case_id", "case_no", "action", "reason", "status",
-                        "operator", "opinion", "create_time", "update_time",
-                    )
-                    item = dict(zip(cols, row))
-                    item["first_time"] = first_time
-                    if first_time:
-                        item.pop("first_time")
-                        self._mem_approvals[approval_id] = dict(item)
-                        item["first_time"] = True
-                    return item
+                    item = dict(zip(_APPROVAL_COLS, row))
+                    if item["status"] != APPROVAL_STATUS_PENDING:
+                        return _flags(item, False, False)
+                    if status == APPROVAL_STATUS_REJECTED or not _needs_second_approval(
+                        item["action"]
+                    ):
+                        cur.execute(
+                            "UPDATE t_case_approval SET status=%s, operator=%s, opinion=%s, "
+                            "update_time=%s WHERE id=%s AND status=%s",
+                            (status, operator, opinion, now, approval_id, APPROVAL_STATUS_PENDING),
+                        )
+                        item.update(
+                            status=status,
+                            operator=operator,
+                            opinion=opinion,
+                            update_time=now.isoformat(timespec="seconds"),
+                        )
+                    else:
+                        first_op = item.get("first_operator") or ""
+                        if not first_op:
+                            cur.execute(
+                                "UPDATE t_case_approval SET first_operator=%s, first_opinion=%s, "
+                                "first_decide_time=%s, update_time=%s WHERE id=%s AND status=%s",
+                                (operator, opinion, now, now, approval_id, APPROVAL_STATUS_PENDING),
+                            )
+                            item.update(
+                                first_operator=operator,
+                                first_opinion=opinion,
+                                first_decide_time=now.isoformat(timespec="seconds"),
+                                update_time=now.isoformat(timespec="seconds"),
+                            )
+                            self._mem_approvals[approval_id] = {
+                                k: v for k, v in item.items()
+                                if k not in ("first_time", "pending_second")
+                            }
+                            return _flags(item, False, cur.rowcount > 0)
+                        if str(operator_role).strip().lower() != "admin":
+                            raise ValueError(
+                                f"高危动作需管理员终审（当前角色: {operator_role or '未携带'}）"
+                            )
+                        cur.execute(
+                            "UPDATE t_case_approval SET status=%s, operator=%s, opinion=%s, "
+                            "update_time=%s WHERE id=%s AND status=%s",
+                            (status, operator, opinion, now, approval_id, APPROVAL_STATUS_PENDING),
+                        )
+                        item.update(
+                            status=status,
+                            operator=operator,
+                            opinion=opinion,
+                            update_time=now.isoformat(timespec="seconds"),
+                        )
+                    first_time = cur.rowcount > 0
+                    self._mem_approvals[approval_id] = {
+                        k: v for k, v in item.items()
+                        if k not in ("first_time", "pending_second")
+                    }
+                    return _flags(item, first_time, False)
+            except ValueError:
+                raise
             except Exception:  # noqa: BLE001
                 logger.exception("[case] 审批裁决失败: %s", approval_id)
         rec = self._mem_approvals.get(approval_id)
         if rec is None:
             return None
         if rec.get("status") != APPROVAL_STATUS_PENDING:
-            item = dict(rec)
-            item["first_time"] = False
-            return item
+            return _flags(dict(rec), False, False)
+        if status == APPROVAL_STATUS_REJECTED or not _needs_second_approval(
+            rec.get("action", "")
+        ):
+            rec.update(
+                status=status,
+                operator=operator,
+                opinion=opinion,
+                update_time=now.isoformat(timespec="seconds"),
+            )
+            return _flags(dict(rec), True, False)
+        first_op = rec.get("first_operator") or ""
+        if not first_op:
+            rec.update(
+                first_operator=operator,
+                first_opinion=opinion,
+                first_decide_time=now.isoformat(timespec="seconds"),
+                update_time=now.isoformat(timespec="seconds"),
+            )
+            return _flags(dict(rec), False, True)
+        if str(operator_role).strip().lower() != "admin":
+            raise ValueError(f"高危动作需管理员终审（当前角色: {operator_role or '未携带'}）")
         rec.update(
             status=status,
             operator=operator,
             opinion=opinion,
             update_time=now.isoformat(timespec="seconds"),
         )
-        item = dict(rec)
-        item["first_time"] = True
-        return item
+        return _flags(dict(rec), True, False)
+
+    def mark_case_resolved(self, case_id: str) -> bool:
+        """处置执行成功后推进案件至 RESOLVED（非 RESOLVED 均可推进，幂等，重复推进返回 False）。"""
+        now = self._now()
+        if self.enabled:
+            try:
+                with get_pool().connection() as conn, conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE t_case SET status=%s, update_time=%s WHERE id=%s AND status <> %s",
+                        (CASE_STATUS_RESOLVED, now, case_id, CASE_STATUS_RESOLVED),
+                    )
+                    if cur.rowcount > 0:
+                        rec = self._mem_cases.get(case_id)
+                        if rec is not None:
+                            rec["status"] = CASE_STATUS_RESOLVED
+                            rec["update_time"] = now.isoformat(timespec="seconds")
+                        return True
+                    return False
+            except Exception:  # noqa: BLE001
+                logger.exception("[case] 案件状态推进失败: %s", case_id)
+        rec = self._mem_cases.get(case_id)
+        if rec is None:
+            return False
+        if rec.get("status") != CASE_STATUS_RESOLVED:
+            rec["status"] = CASE_STATUS_RESOLVED
+            rec["update_time"] = now.isoformat(timespec="seconds")
+            return True
+        return False
 
     # ------------------------------------------------------------------
     # 处置动作 + 审计日志 + 归档（Phase 3）
