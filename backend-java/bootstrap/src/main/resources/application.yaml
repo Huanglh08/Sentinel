@@ -119,11 +119,12 @@ rag:
       lease-seconds: 30
       poll-interval-ms: 200
 
-  memory:
+  # 会话记忆由 Python agent 的「会话状态卡」承担（t_session_memory），
+  # ragent 的滚动摘要机制已退役；仅保留两个通用开关，走代码内默认值：
+  #   rag.conversation.history-keep-turns（默认 8，最近 N 轮历史透传）
+  #   rag.conversation.title-max-length（默认 30，会话标题截断）
+  conversation:
     history-keep-turns: 8
-    summary-enabled: true
-    summary-start-turns: 9
-    summary-max-chars: 400
     title-max-length: 30
 
   semaphore:

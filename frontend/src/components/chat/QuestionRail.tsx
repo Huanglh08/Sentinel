@@ -35,7 +35,7 @@ export function QuestionRail({ items, activeId, onSelect }: QuestionRailProps) {
         className={cn(
           "transition-all duration-200 ease-out",
           expanded
-            ? "w-[260px] rounded-2xl border border-[#E5E5E5] bg-white px-1.5 py-2 shadow-lg"
+            ? "w-[260px] rounded-2xl border border-white/10 bg-slate-900/95 px-1.5 py-2 shadow-lg shadow-black/40"
             : "w-[28px] bg-transparent"
         )}
       >
@@ -59,7 +59,7 @@ export function QuestionRail({ items, activeId, onSelect }: QuestionRailProps) {
                   className={cn(
                     "flex w-full items-center transition-colors",
                     expanded
-                      ? "gap-3 rounded-md px-3 py-1.5 hover:bg-[#F5F5F5]"
+                      ? "gap-3 rounded-md px-3 py-1.5 hover:bg-white/5"
                       : "justify-end"
                   )}
                   aria-label={item.text}
@@ -70,7 +70,7 @@ export function QuestionRail({ items, activeId, onSelect }: QuestionRailProps) {
                         "flex-1 truncate text-left text-[13px] transition-colors",
                         isActive
                           ? "font-medium text-[#3B82F6]"
-                          : "text-[#666666]"
+                          : "text-slate-400"
                       )}
                     >
                       {item.text}
@@ -80,7 +80,7 @@ export function QuestionRail({ items, activeId, onSelect }: QuestionRailProps) {
                     aria-hidden="true"
                     className={cn(
                       "inline-block w-[14px] shrink-0 rounded-full transition-all",
-                      isActive ? "h-[3px] bg-[#2563EB]" : "h-[1.5px] bg-[#D4D4D4]"
+                      isActive ? "h-[3px] bg-[#2563EB]" : "h-[1.5px] bg-white/25"
                     )}
                   />
                 </button>

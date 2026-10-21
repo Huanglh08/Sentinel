@@ -2981,8 +2981,10 @@ textarea {
 }
 
 .user-message {
-  background: #f5f5f5;
-  color: #333333;
+  /* 深空底适配：低透明白玻璃 + 品牌青描边，与编辑气泡（bg-slate-900/90 border-cyan-400/30）同族 */
+  background: rgba(255, 255, 255, 0.07);
+  color: #e8f3ff;
+  border: 1px solid rgba(34, 211, 238, 0.22);
   padding: 10px 16px;
   border-radius: 16px 16px 4px 16px;
   max-width: 80%;

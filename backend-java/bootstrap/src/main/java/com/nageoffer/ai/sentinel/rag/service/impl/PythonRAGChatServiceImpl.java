@@ -17,6 +17,7 @@
 
 package com.nageoffer.ai.sentinel.rag.service.impl;
 
+import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.IdUtil;
 import cn.hutool.core.util.StrUtil;
 import com.nageoffer.ai.sentinel.framework.context.UserContext;
@@ -24,9 +25,6 @@ import com.nageoffer.ai.sentinel.framework.convention.ChatMessage;
 import com.nageoffer.ai.sentinel.framework.convention.SourceRef;
 import com.nageoffer.ai.sentinel.framework.web.SseEmitterSender;
 import com.nageoffer.ai.sentinel.rag.client.PythonAgentClient;
-import com.nageoffer.ai.sentinel.rag.config.MemoryProperties;
-import com.nageoffer.ai.sentinel.rag.controller.vo.ConversationMessageVO;
-import com.nageoffer.ai.sentinel.rag.core.memory.ConversationMemoryService;
 import com.nageoffer.ai.sentinel.rag.core.retrieval.channel.KbCollectionProvider;
 import com.nageoffer.ai.sentinel.rag.dao.entity.ConversationDO;
 import com.nageoffer.ai.sentinel.rag.dto.CompletionPayload;
@@ -36,14 +34,21 @@ import com.nageoffer.ai.sentinel.rag.enums.ConversationMessageOrder;
 import com.nageoffer.ai.sentinel.rag.enums.SSEEventType;
 import com.nageoffer.ai.sentinel.rag.service.ConversationGroupService;
 import com.nageoffer.ai.sentinel.rag.service.ConversationMessageService;
+import com.nageoffer.ai.sentinel.rag.service.ConversationService;
 import com.nageoffer.ai.sentinel.rag.service.RAGChatService;
+import com.nageoffer.ai.sentinel.rag.service.bo.ConversationCreateBO;
+import com.nageoffer.ai.sentinel.rag.service.bo.ConversationMessageBO;
+import com.nageoffer.ai.sentinel.rag.controller.vo.ConversationMessageVO;
 import com.nageoffer.ai.sentinel.rag.trace.StreamChatTraceRunner;
+import com.nageoffer.ai.sentinel.rag.util.CitationMarkup;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -51,14 +56,16 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * 基于 Python agent 的对话服务实现（g2 分层）�?
+ * 基于 Python agent 的对话服务实现（g2 分层）。
  * <p>
- * 复刻 sentinel �?{@code StreamChatEventHandler} �?SSE 协议与落库行为：
+ * 复刻 sentinel 的 {@code StreamChatEventHandler} 的 SSE 协议与落库行为：
  * <ol>
- *   <li>发�?META 帧（conversationId / taskId�?/li>
- *   <li>透传 Python {@code /chat} �?MESSAGE 帧（type=response, delta=token�?/li>
- *   <li>收到 complete 后：落库 �?�?FINISH（messageId / title / sources）→ �?DONE</li>
+ *   <li>发送 META 帧（conversationId / taskId）</li>
+ *   <li>透传 Python {@code /chat} 的 MESSAGE 帧（type=response, delta=token）</li>
+ *   <li>收到 complete 后：落库 + FINISH（messageId / title / sources）→ DONE</li>
  * </ol>
+ * 会话记忆由 Python agent 侧的「会话状态卡」承担；本类只负责消息持久化与
+ * 最近 N 轮历史的透传（plumbing），不再包含 ragent 的滚动摘要机制。
  */
 @Slf4j
 @Service
@@ -67,11 +74,13 @@ public class PythonRAGChatServiceImpl implements RAGChatService {
 
     private final PythonAgentClient pythonAgentClient;
     private final ConversationMessageService conversationMessageService;
-    private final ConversationMemoryService conversationMemoryService;
+    private final ConversationService conversationService;
     private final ConversationGroupService conversationGroupService;
-    private final MemoryProperties memoryProperties;
     private final KbCollectionProvider kbCollectionProvider;
     private final StreamChatTraceRunner streamChatTraceRunner;
+
+    @Value("${rag.conversation.history-keep-turns:8}")
+    private int historyKeepTurns;
 
     @Override
     public void streamChat(String question, String conversationId, Boolean deepThinking, SseEmitter emitter) {
@@ -90,7 +99,7 @@ public class PythonRAGChatServiceImpl implements RAGChatService {
         // Persist user question first: creates conversation record (same as legacy StreamChatEventHandler).
         persistUserMessage(actualConversationId, userId, question);
 
-        // 初始化：发�?META �?
+        // 初始化：发送 META 帧
         sender.sendEvent(SSEEventType.META.value(), new MetaPayload(actualConversationId, taskId));
 
         emitter.onTimeout(() -> {
@@ -115,16 +124,16 @@ public class PythonRAGChatServiceImpl implements RAGChatService {
                         knowledgeBaseIds,
                         history,
                         trace.onToken(delta -> {
-                            // 透传 MESSAGE 帧（type=response�?
+                            // 透传 MESSAGE 帧（type=response）
                             answer.append(delta);
                             sender.sendEvent(SSEEventType.MESSAGE.value(), new MessageDelta("response", delta));
                         }),
                         trace.onThink(thinkDelta -> {
-                            // 透传 THINK 帧（thinking 内容�?
+                            // 透传 THINK 帧（thinking 内容）
                             sender.sendEvent(SSEEventType.THINK.value(), new MessageDelta("think", thinkDelta));
                         }),
                         trace.onCompleteData(completeData -> {
-                            // 流结束：落库 �?FINISH �?DONE
+                            // 流结束：落库 + FINISH 帧 + DONE
                             String fullText = (String) completeData.getOrDefault("full_text", answer.toString());
                             String messageId = persistMessage(actualConversationId, userId, fullText);
                             String title = resolveTitle(actualConversationId, userId);
@@ -161,6 +170,36 @@ public class PythonRAGChatServiceImpl implements RAGChatService {
         }
     }
 
+    /**
+     * 消息持久化（原 ConversationMemoryStore.append 的落库部分内联）：
+     * 写消息 + 首条用户消息时创建/更新会话记录（标题由 ConversationService 内部生成）。
+     */
+    private String appendMessage(String conversationId, String userId, ChatMessage message) {
+        ConversationMessageBO conversationMessage = ConversationMessageBO.builder()
+                .conversationId(conversationId)
+                .userId(userId)
+                .role(message.getRole().name().toLowerCase())
+                .content(message.getContent())
+                .thinkingContent(message.getThinkingContent())
+                .thinkingDuration(message.getThinkingDuration())
+                .sources(message.getSources())
+                .retrievedChunks(message.getRetrievedChunks())
+                .replyToMessageId(message.getReplyToMessageId())
+                .messageStatus(message.getMessageStatus() == null ? null : message.getMessageStatus().name())
+                .build();
+        String messageId = conversationMessageService.addMessage(conversationMessage);
+        if (message.getRole() == ChatMessage.Role.USER) {
+            ConversationCreateBO conversation = ConversationCreateBO.builder()
+                    .conversationId(conversationId)
+                    .userId(userId)
+                    .question(message.getContent())
+                    .lastTime(new Date())
+                    .build();
+            conversationService.createOrUpdate(conversation);
+        }
+        return messageId;
+    }
+
     private String persistMessage(String conversationId, String userId, String content) {
         if (StrUtil.isBlank(content)) {
             return null;
@@ -168,7 +207,7 @@ public class PythonRAGChatServiceImpl implements RAGChatService {
         try {
             ChatMessage message = ChatMessage.assistant(content);
             message.setMessageStatus(ChatMessage.MessageStatus.NORMAL);
-            return conversationMemoryService.append(conversationId, userId, message);
+            return appendMessage(conversationId, userId, message);
         } catch (Exception e) {
             log.error("对话完成时持久化消息失败，conversationId：{}", conversationId, e);
             return null;
@@ -180,7 +219,7 @@ public class PythonRAGChatServiceImpl implements RAGChatService {
             return;
         }
         try {
-            conversationMemoryService.append(conversationId, userId, ChatMessage.user(question));
+            appendMessage(conversationId, userId, ChatMessage.user(question));
         } catch (Exception e) {
             log.error("persist user message failed, conversationId={}", conversationId, e);
         }
@@ -222,30 +261,38 @@ public class PythonRAGChatServiceImpl implements RAGChatService {
         return result;
     }
 
+    /**
+     * 读取最近 history-keep-turns 轮对话（plumbing 透传，不做摘要）。
+     * 长期记忆由 Python agent 的会话状态卡承担，超出窗口的内容经状态卡延续。
+     */
     private List<Map<String, String>> loadHistory(String conversationId) {
         List<Map<String, String>> history = new ArrayList<>();
         if (conversationId == null || conversationId.isBlank()) {
             return history;
         }
-        int limit = memoryProperties.getHistoryKeepTurns() * 2;
-        if (limit <= 0) {
-            limit = 20;
-        }
+        int limit = historyKeepTurns > 0 ? historyKeepTurns * 2 : 16;
         String userId = UserContext.getUserId();
         try {
             List<ConversationMessageVO> messages = conversationMessageService.listMessages(
                     conversationId, userId, limit, ConversationMessageOrder.DESC);
+            if (CollUtil.isEmpty(messages)) {
+                return history;
+            }
+            List<ChatMessage> cleaned = new ArrayList<>();
             for (int i = messages.size() - 1; i >= 0; i--) {
-                ConversationMessageVO m = messages.get(i);
-                if (m == null || m.getRole() == null || m.getContent() == null) {
-                    continue;
+                ChatMessage m = toChatMessage(messages.get(i));
+                if (m != null) {
+                    cleaned.add(m);
                 }
-                String role = m.getRole().toLowerCase();
-                if (!"user".equals(role) && !"assistant".equals(role)) {
-                    continue;
-                }
+            }
+            // 裁掉首条孤立 assistant（旧会话尾部回复）：保持 user 起始的成对结构
+            int start = 0;
+            while (start < cleaned.size() && cleaned.get(start).getRole() == ChatMessage.Role.ASSISTANT) {
+                start++;
+            }
+            for (ChatMessage m : cleaned.subList(start, cleaned.size())) {
                 Map<String, String> map = new LinkedHashMap<>();
-                map.put("role", role);
+                map.put("role", m.getRole().name().toLowerCase());
                 map.put("content", m.getContent());
                 history.add(map);
             }
@@ -253,5 +300,16 @@ public class PythonRAGChatServiceImpl implements RAGChatService {
             log.warn("读取会话历史失败 conversationId={}", conversationId, e);
         }
         return history;
+    }
+
+    private ChatMessage toChatMessage(ConversationMessageVO record) {
+        if (record == null || StrUtil.isBlank(record.getContent())) {
+            return null;
+        }
+        ChatMessage.Role role = ChatMessage.Role.fromString(record.getRole());
+        String content = role == ChatMessage.Role.ASSISTANT
+                ? CitationMarkup.strip(record.getContent())
+                : record.getContent();
+        return new ChatMessage(role, content);
     }
 }

@@ -27,6 +27,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from core.agent import Agent
+from core.agent_profile.service import ClientException
 from core.case import CaseInvestigationAgent
 from core.case.notify import notify_approval_decided
 from core.case.patrol import CasePatroller
@@ -76,7 +77,8 @@ from core.admin import (
     build_knowledge_base_router, build_knowledge_document_router, build_knowledge_chunk_router)
 from core.demo_mode import DemoModeMiddleware, DemoModeProperties
 from core.ratelimit import ChatQueueLimiter, FairDistributedRateLimiter, RAGRateLimitProperties
-from core.memory.store import JdbcConversationMemoryStore, DefaultConversationMemoryService, ConversationRepository, next_message_id
+from core.case.ids import next_message_id
+from core.session_memory import SessionMemory
 
 _logger = logging.getLogger("sentinel.api")
 _settings = AppSettings()
@@ -108,17 +110,13 @@ class CaseInvestigateRequest(BaseModel):
 
     clue: str = Field(min_length=5, max_length=20000, description="告警/线索原文")
     source: str = Field(default="MANUAL", max_length=32, description="线索来源: MANUAL/WEBHOOK/SCAN")
+    alert_id: str = Field(default="", max_length=64, description="告警编号；传入后取证工具只返回该告警关联的记录（案件隔离）")
 
 
 class RecommendRequest(BaseModel):
     question: str = Field(min_length=1, max_length=20000)
     answer: str = Field(default="", max_length=60000)
     chunks: list[dict] | None = Field(default=None, description="[{doc_name, text}]")
-
-
-class SummarizeRequest(BaseModel):
-    messages: list[dict] = Field(default_factory=list, description="[{role, content}]")
-    existing_summary: str = Field(default="", max_length=20000)
 
 
 class TextIngestRequest(BaseModel):
@@ -187,10 +185,14 @@ async def lifespan(application: FastAPI):
         # Redis unreachable: skip queue limiting instead of failing startup
         _logger.warning("queue limiter disabled (redis unavailable): %s", exc)
         application.state.queue_limiter = None
-    # 1:1 翻译 ragent ConversationMemoryService 初始化
-    memory_repo = ConversationRepository()
-    memory_store = JdbcConversationMemoryStore(repo=memory_repo)
-    application.state.memory_service = DefaultConversationMemoryService(store=memory_store)
+    # 会话状态卡（agent 自主记忆）：建表 + 挂 app.state；失败不阻塞启动（chat 内再降级）
+    try:
+        _session_memory = SessionMemory()
+        _session_memory.ensure_table()
+        application.state.session_memory = _session_memory
+    except Exception as exc:  # noqa: BLE001
+        _logger.warning("session memory 初始化失败（状态卡将不可用）: %s", exc)
+        application.state.session_memory = None
     refresh_runtime_components(application)
     # Phase 4: 定时巡检批处理（确定性调度与 Agent 分离；默认关闭 CASE_PATROL_INTERVAL<=0）
     try:
@@ -484,6 +486,16 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
         status_code=exc.status_code,
         content=_error_payload(request, f"HTTP_{exc.status_code}", detail.get("message", "request failed"), detail),
         headers=exc.headers,
+    )
+
+
+@app.exception_handler(ClientException)
+async def client_exception_handler(request: Request, exc: ClientException) -> JSONResponse:
+    # 业务校验异常（agent_profile/sample_question/query_term_mapping 等 16 处 raise）统一 400 + 具体原因，
+    # 未注册时会掉进下方 500 兜底，前端只能看到 internal server error
+    return JSONResponse(
+        status_code=400,
+        content=_error_payload(request, "CLIENT_ERROR", str(exc)),
     )
 
 
@@ -914,7 +926,9 @@ async def case_investigate(payload: CaseInvestigateRequest, request: Request, us
 
     async def events() -> AsyncIterator[str]:
         try:
-            async for event in case_agent.investigate(payload.clue, user_id=str(user_id), source=payload.source):
+            async for event in case_agent.investigate(
+                payload.clue, user_id=str(user_id), source=payload.source, alert_id=payload.alert_id
+            ):
                 if await request.is_disconnected():
                     raise asyncio.CancelledError()
                 yield f"event: message\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
@@ -1276,7 +1290,6 @@ async def chat(payload: ChatRequest, request: Request, user=Depends(get_current_
     """
     agent: Agent = request.app.state.agent
     queue_limiter: ChatQueueLimiter = getattr(request.app.state, "queue_limiter", None)
-    memory_service = getattr(request.app.state, "memory_service", None)
     request_id = getattr(request.state, "request_id", None)
     task_id = payload.taskId or payload.conversationId or request_id or str(id(asyncio.current_task()))
     user_id = getattr(user, "username", None) or getattr(user, "id", None) or "anonymous"
@@ -1344,22 +1357,16 @@ async def chat(payload: ChatRequest, request: Request, user=Depends(get_current_
             "_cancelled": cancelled,
         }
         full_text_parts: list[str] = []
+        # 会话状态卡：本轮开始前加载（注入 system 供 agent 保持一致），
+        # 本轮结束后用 agent 自主输出的 memory_delta 合并回写（note-taking）
+        session_memory: SessionMemory | None = getattr(request.app.state, "session_memory", None)
+        session_id = payload.conversationId
+        if session_memory is not None and session_id:
+            try:
+                scope["session_state"] = session_memory.load(session_id)
+            except Exception as e:
+                _logger.warning("load session state failed: %s", e)
         try:
-            # g2 layered mode: persistence (user/assistant messages + conversation
-            # record) belongs to the Java gateway (PythonRAGChatServiceImpl, the
-            # counterpart of ragent RAGChatServiceImpl). This endpoint only loads
-            # history for generation context; persisting here would duplicate rows.
-            if memory_service is not None:
-                try:
-                    history_messages = memory_service.load(payload.conversationId, str(user_id))
-                    if history_messages and not payload.history:
-                        scope["history"] = [
-                            {"role": m.role.value, "content": m.content}
-                            for m in history_messages
-                        ]
-                except Exception as e:
-                    _logger.warning("load memory failed: %s", e)
-
             async for token in agent.answer(payload.question, scope=scope):
                 if await request.is_disconnected():
                     raise asyncio.CancelledError()
@@ -1388,6 +1395,12 @@ async def chat(payload: ChatRequest, request: Request, user=Depends(get_current_
                 yield f"event: sources\ndata: {json.dumps({'sources': sources, 'grounding_chunks': grounding_chunks}, ensure_ascii=False)}\n\n"
                 yield f"event: complete\ndata: {json.dumps({'full_text': full_text, 'sources': sources, 'grounding_chunks': grounding_chunks, 'ttft_breakdown': scope.get('_ttft_breakdown')}, ensure_ascii=False)}\n\n"
                 yield f"event: end\ndata: {json.dumps({'status': 'done', 'request_id': request_id}, ensure_ascii=False)}\n\n"
+                # 状态卡回写：agent 自主输出的 memory_delta 合并入库（解析失败静默丢弃）
+                if session_memory is not None and session_id:
+                    try:
+                        session_memory.apply_delta(session_id, str(scope.get("_memory_delta") or ""))
+                    except Exception as e:
+                        _logger.warning("apply memory_delta failed: %s", e)
                 # Assistant persistence is handled by the Java gateway; no double write here.
         except asyncio.CancelledError:
             _logger.info("chat cancelled request_id=%s task_id=%s", request_id, task_id)
@@ -1429,14 +1442,6 @@ async def recommend(payload: RecommendRequest, request: Request, user=Depends(ge
     agent: Agent = request.app.state.agent
     questions = await agent.recommend_questions(payload.question, payload.answer, payload.chunks or [])
     return {"questions": questions}
-
-
-@app.post("/summarize")
-async def summarize(payload: SummarizeRequest, request: Request, user=Depends(get_current_user)):
-    """生成会话记忆摘要（替代 Java 侧本地 LLM 摘要）"""
-    agent: Agent = request.app.state.agent
-    summary = await agent.summarize(payload.messages, payload.existing_summary)
-    return {"summary": summary}
 
 
 # ---- 服务端任务取消（对齐 ragent stopTask）----

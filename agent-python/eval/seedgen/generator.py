@@ -615,6 +615,137 @@ def gen_case(
     return rows
 
 
+# ===========================================================================
+# case-seeds（覆盖率驱动版）
+# ===========================================================================
+
+
+def _render_case_spec_prompt(spec: dict[str, Any]) -> str:
+    """把一条覆盖规格渲染成生成 prompt（含阈值边界要求）。"""
+    boundary_block = ""
+    bk = spec.get("boundary_key")
+    if bk:
+        from eval.coverage import BOUNDARY_BY_KEY
+
+        b = BOUNDARY_BY_KEY.get(str(bk))
+        if b:
+            boundary_block = (
+                f"\n- **阈值边界要求**：线索中必须出现「{b.metric}」的取值 **"
+                f"{spec.get('boundary_point')}**"
+                f"（该阈值的业务定义是「{b.threshold}」，依据 {b.source}）\n"
+            )
+    return prompts.CASE_COVERAGE.format(
+        conclusion=spec.get("conclusion", ""),
+        technique=spec.get("technique", ""),
+        evidence_strength=spec.get("evidence_strength", ""),
+        info_completeness=spec.get("info_completeness", ""),
+        score_band=spec.get("score_band", ""),
+        score_band_desc=prompts.SCORE_BAND_DESC.get(str(spec.get("score_band", "")), ""),
+        risk_level=spec.get("risk_level", ""),
+        disposal_level=spec.get("disposal_level", ""),
+        disposal_desc=prompts.DISPOSAL_DESC.get(str(spec.get("disposal_level", "")), ""),
+        disturbance=spec.get("disturbance", ""),
+        subject_type=spec.get("subject_type", ""),
+        boundary_block=boundary_block,
+    )
+
+
+def gen_case_coverage(
+    llm: SeedLLM,
+    *,
+    plan: list[dict[str, Any]],
+    per_spec: int = 1,
+    start_id: int = 0,
+    existing: list[str] | None = None,
+    flush_path: Path | None = None,
+    flush_every: int = 10,
+    done_specs: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """按覆盖计划逐规格定向生成 case 种子。
+
+    与 gen_case() 的关键区别：gen_case 只按「结论」配额随机出题，结论分布能齐
+    但维度是塌的（证据强度、评分档、干扰类型一条都测不到）。本函数**逐规格指定
+    每个维度的取值**，产出后写入 `coverage` 字段，使 coverage_report 能做精确
+    统计与收敛判定。
+
+    规格由 eval.coverage.build_coverage_plan / build_boundary_plan 产出；
+    规格之间不能混批（混了 LLM 会忽略规格），因此每个规格单独一次调用。
+    `per_spec` 控制每个规格生成几条变体（1 = 刚好达标，2 = 留冗余）。
+
+    长任务的两个保障（跑满 148 条规格需要一小时以上，中断一次代价很大）：
+    - **增量落盘**（flush_path）：每 flush_every 条规格追加写一次，避免中途异常
+      导致已生成的成果全部丢失（原来的 write_jsonl 是最后统一写的）。
+    - **断点续传**（done_specs）：已完成的规格直接跳过，重启不重复烧 LLM 调用。
+    """
+    from eval.coverage import spec_key
+
+    rows: list[dict[str, Any]] = []
+    pending: list[dict[str, Any]] = []
+    dedup = Deduper()
+    dedup.add(existing or [])
+    done = done_specs or set()
+    total = len(plan)
+    calls_before = llm.calls
+    skipped = 0
+
+    for i, spec in enumerate(plan):
+        if spec_key(spec) in done:
+            skipped += 1
+            continue
+        idx = start_id + i + 1
+        prompt = _render_case_spec_prompt(spec)
+        concl = str(spec.get("conclusion", ""))
+        cov = {k: v for k, v in spec.items() if k not in ("boundary_key", "boundary_point")}
+        if spec.get("boundary_key"):
+            cov["boundary_keys"] = [str(spec["boundary_key"])]
+
+        def _make_row(
+            it: dict[str, Any],
+            q: str,
+            *,
+            idx: int = idx,
+            concl: str = concl,
+            cov: dict[str, Any] = cov,
+            spec: dict[str, Any] = spec,
+        ) -> dict[str, Any]:
+            return {
+                "id": f"CASE-{idx:04d}",
+                "name": str(it.get("name") or f"case-cov-{idx:04d}"),
+                "clue": str(it.get("clue", q)).strip() or q,
+                "expect_conclusion": concl,
+                "min_confidence": 0.0 if concl == "inconclusive" else 0.6,
+                "key_evidence": _as_list(it.get("key_evidence")),
+                "coverage": dict(cov),
+                "boundary_point": spec.get("boundary_point"),
+            }
+
+        got = _gen_batch(
+            llm,
+            dedup,
+            prompt,
+            want=per_spec,
+            key_fn=lambda it: str(it.get("clue", "")),
+            make_row=_make_row,
+        )
+        rows.extend(got)
+        pending.extend(got)
+
+        if flush_path is not None and pending and (i + 1) % flush_every == 0:
+            write_jsonl(flush_path, pending, append=True)
+            pending = []
+
+        if (i + 1) % 10 == 0 or i == total - 1:
+            print(
+                f"    [coverage] {i + 1}/{total} 规格 -> {len(rows)} 条"
+                f"（LLM 调用 {llm.calls - calls_before}，跳过 {skipped}）",
+                flush=True,
+            )
+
+    if flush_path is not None and pending:
+        write_jsonl(flush_path, pending, append=True)
+    return rows
+
+
 def gen_multturn(
     llm: SeedLLM,
     docs: list[Doc],

@@ -16,7 +16,9 @@ function applyTheme(theme: ThemeMode) {
 }
 
 export const useThemeStore = create<ThemeState>((set, get) => ({
-  theme: "light",
+  // 界面为常驻深空底设计（.sentinel-app #04070F），默认必须 dark：
+  // 正文/角标/悬浮卡（含 portal 到 body 的 Tooltip）都依赖 dark: 变体，light 口径的 #333 文字在深底上不可读
+  theme: "dark",
   setTheme: (theme) => {
     storage.setTheme(theme);
     applyTheme(theme);
@@ -28,7 +30,7 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
   },
   initialize: () => {
     const stored = storage.getTheme();
-    const theme = stored === "dark" ? "dark" : "light";
+    const theme = stored === "light" ? "light" : "dark";
     applyTheme(theme);
     set({ theme });
   }

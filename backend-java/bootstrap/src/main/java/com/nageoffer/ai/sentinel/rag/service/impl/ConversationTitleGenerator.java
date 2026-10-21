@@ -18,10 +18,10 @@
 package com.nageoffer.ai.sentinel.rag.service.impl;
 
 import com.nageoffer.ai.sentinel.rag.client.PythonAgentClient;
-import com.nageoffer.ai.sentinel.rag.config.MemoryProperties;
 import com.nageoffer.ai.sentinel.framework.trace.RagTraceNode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
@@ -37,12 +37,14 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class ConversationTitleGenerator {
 
-    private final MemoryProperties memoryProperties;
     private final PythonAgentClient pythonAgentClient;
+
+    @Value("${rag.conversation.title-max-length:30}")
+    private int titleMaxLength;
 
     @RagTraceNode(name = "conversation-title-gen", type = "TITLE_GEN")
     public String generate(String question) {
-        int maxLen = memoryProperties.getTitleMaxLength();
+        int maxLen = titleMaxLength;
         if (maxLen <= 0) {
             maxLen = 30;
         }

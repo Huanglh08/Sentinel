@@ -20,7 +20,6 @@ package com.nageoffer.ai.sentinel.rag.service;
 import com.nageoffer.ai.sentinel.rag.controller.vo.ConversationMessageVO;
 import com.nageoffer.ai.sentinel.rag.enums.ConversationMessageOrder;
 import com.nageoffer.ai.sentinel.rag.service.bo.ConversationMessageBO;
-import com.nageoffer.ai.sentinel.rag.service.bo.ConversationSummaryBO;
 
 import java.util.List;
 
@@ -43,11 +42,4 @@ public interface ConversationMessageService {
      * @return 对话消息列表
      */
     List<ConversationMessageVO> listMessages(String conversationId, String userId, Integer limit, ConversationMessageOrder order);
-
-    /**
-     * 添加对话摘要
-     *
-     * @param conversationSummary 对话摘要内容
-     */
-    void addMessageSummary(ConversationSummaryBO conversationSummary);
 }

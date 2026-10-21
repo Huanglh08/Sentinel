@@ -23,7 +23,6 @@ import com.nageoffer.ai.sentinel.rag.dao.entity.ConversationDO;
 import com.nageoffer.ai.sentinel.rag.dao.entity.ConversationMessageDO;
 import com.nageoffer.ai.sentinel.rag.dao.mapper.ConversationMapper;
 import com.nageoffer.ai.sentinel.rag.dao.mapper.ConversationMessageMapper;
-import com.nageoffer.ai.sentinel.rag.dao.mapper.ConversationSummaryMapper;
 import com.nageoffer.ai.sentinel.rag.enums.ConversationMessageOrder;
 import com.nageoffer.ai.sentinel.rag.service.MessageFeedbackService;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
@@ -50,9 +49,6 @@ class ConversationMessageServiceImplOrderTest {
 
     @Mock
     private ConversationMessageMapper conversationMessageMapper;
-
-    @Mock
-    private ConversationSummaryMapper conversationSummaryMapper;
 
     @Mock
     private ConversationMapper conversationMapper;

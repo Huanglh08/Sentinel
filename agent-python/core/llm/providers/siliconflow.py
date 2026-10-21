@@ -11,7 +11,7 @@ class SiliconFlowLLMService(OpenAIStyleLLMService):
 
     provider_id: str = "siliconflow"
     DEFAULT_BASE_URL: str = "https://api.siliconflow.cn/v1"
-    DEFAULT_MODEL: str = "Qwen/Qwen2.5-7B-Instruct"
+    DEFAULT_MODEL: str = "Qwen/Qwen2.5-72B-Instruct"
 
     def __init__(self, api_key: str | None = None, model: str | None = None, timeout: float = 60.0) -> None:
         super().__init__(

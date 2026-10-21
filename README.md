@@ -21,7 +21,7 @@ Java 业务后端 + Python 智能体分层架构，内置完整的 RAG 评测与
 
 | 登录 | 对话 | 案件调查 |
 |:---:|:---:|:---:|
-| ![](frontend-login-current.png) | ![](frontend-chat-current.png) | ![](frontend-admin-current.png) |
+| <img src="frontend-login-current.png" width="380" align="middle"/> | <img src="frontend-chat-current.png" width="380" align="middle"/> | <img src="frontend-admin-current.png" width="380" align="middle"/> |
 
 </div>
 
@@ -78,7 +78,7 @@ sentinel-main/
 
 ## 快速开始
 
-**一键启动（Windows）**：双击 [`start-sentinel.bat`](start-sentinel.bat)——按序拉起 Docker 中间件 → Python Agent → Java 后端 → MCP Server → 前端，并自动检查四个端口存活。
+**一键启动（Windows）**：双击 [`start-sentinel.bat`](scripts/start-sentinel.bat)——按序拉起 Docker 中间件 → Python Agent → Java 后端 → MCP Server → 前端，并自动检查四个端口存活。
 
 <details>
 <summary>手动分步启动</summary>

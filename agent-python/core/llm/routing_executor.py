@@ -40,8 +40,12 @@ class ModelRoutingExecutor:
         targets: list[ModelTarget],
         client_resolver: Callable[[ModelTarget], Any],
         caller: Callable[[Any, ModelTarget], T],
+        on_success: Callable[[ModelTarget], None] | None = None,
     ) -> T:
-        """严格对应 ragent executeWithFallback(capability, targets, clientResolver, caller)。"""
+        """严格对应 ragent executeWithFallback(capability, targets, clientResolver, caller)。
+
+        on_success: 可选回调——某个 target 成功后被调用（用于粘性首选记忆）。
+        """
         if not targets:
             raise LLMError(
                 f"No {capability.value} model candidates available",
@@ -62,6 +66,8 @@ class ModelRoutingExecutor:
             try:
                 response = caller(client, target)
                 self._health_store.record_success(target.id, permit)
+                if on_success is not None:
+                    on_success(target)
                 return response
             except Exception as e:  # noqa: BLE001
                 last_error = e

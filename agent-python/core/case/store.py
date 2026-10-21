@@ -31,7 +31,7 @@ from core.case.types import (
 )
 from core.db import get_pool
 from core.guard.indirect import check_kb_distillation
-from core.memory.store import next_message_id
+from core.case.ids import next_message_id
 
 logger = logging.getLogger(__name__)
 
@@ -304,8 +304,9 @@ class CaseStore:
                 with get_pool().connection() as conn, conn.cursor() as cur:
                     cur.execute(
                         "INSERT INTO t_case_evidence (id, case_id, step_no, phase, thought, "
-                        "tool_id, tool_args, observation, is_error, elapsed_ms, create_time) "
-                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                        "tool_id, tool_args, observation, is_error, elapsed_ms, tool_status, "
+                        "record_count, create_time) "
+                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                         (
                             next_message_id(),
                             case_id,
@@ -317,6 +318,8 @@ class CaseStore:
                             step.observation,
                             1 if step.is_error else 0,
                             step.elapsed_ms,
+                            step.tool_status or "",
+                            int(step.record_count or 0),
                             self._now(),
                         ),
                     )
@@ -340,8 +343,8 @@ class CaseStore:
                         case = dict(zip(_CASE_COLS.split(", "), row))
                         cur.execute(
                             "SELECT step_no, phase, thought, tool_id, tool_args, observation, "
-                            "is_error, elapsed_ms, create_time FROM t_case_evidence "
-                            "WHERE case_id=%s ORDER BY step_no",
+                            "is_error, elapsed_ms, tool_status, record_count, create_time "
+                            "FROM t_case_evidence WHERE case_id=%s ORDER BY step_no",
                             (case_id,),
                         )
                         evidence = []
@@ -357,6 +360,8 @@ class CaseStore:
                                         "observation",
                                         "is_error",
                                         "elapsed_ms",
+                                        "tool_status",
+                                        "record_count",
                                         "create_time",
                                     ),
                                     r,

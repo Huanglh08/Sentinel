@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 
 from core.db import get_pool
-from core.memory.store import next_message_id
+from core.case.ids import next_message_id
 
 logger = logging.getLogger(__name__)
 

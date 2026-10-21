@@ -677,20 +677,6 @@ export function SystemSettingsPage() {
           </div>
           <div className="settings-card">
             <div className="settings-card-title">
-              会话记忆
-              <span className="settings-card-title-hint">
-                <StateTag on={rag.memory.summaryEnabled} onText="摘要压缩启用" offText="摘要压缩关闭" />
-              </span>
-            </div>
-            <div className="settings-kv-grid">
-              <KV label="历史保留轮数" value={`${rag.memory.historyKeepTurns} 轮`} />
-              <KV label="摘要起始轮数" value={`第 ${rag.memory.summaryStartTurns} 轮`} />
-              <KV label="摘要长度上限" value={`${rag.memory.summaryMaxChars} 字`} />
-              <KV label="会话标题上限" value={`${rag.memory.titleMaxLength} 字`} />
-            </div>
-          </div>
-          <div className="settings-card">
-            <div className="settings-card-title">
               全局限流
               <span className="settings-card-title-hint">
                 <StateTag on={rag.rateLimit.global.enabled} />

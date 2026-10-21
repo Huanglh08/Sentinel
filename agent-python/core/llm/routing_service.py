@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from typing import Any, AsyncIterator
 
 import httpx
@@ -45,11 +46,33 @@ class RoutingLLMService:
         executor: ModelRoutingExecutor,
         chat_clients_by_provider: dict[str, Any],
         first_packet_probe: Any | None = None,
+        sticky_ttl_ms: float = 300_000.0,
     ) -> None:
         self._selector = selector
         self._executor = executor
         self._clients = chat_clients_by_provider
         self._first_packet_probe = first_packet_probe
+        # 粘性首选：探路成功后锁定该模型 TTL 时长，期间请求直达它，不再逐个试探候选。
+        # TTL 到期后的第一个请求自然走默认候选序重新探路（首选恢复则免费切回）。
+        self._sticky_model_id: str | None = None
+        self._sticky_until_ms: float = 0.0
+        self._sticky_ttl_ms = float(sticky_ttl_ms)
+
+    # ==================== sticky 首选 ====================
+
+    def preferred_sticky_model(self) -> str | None:
+        """TTL 内返回锁定的模型 id；过期则清除并返回 None（下一个请求负责探路）。"""
+        if self._sticky_model_id is None:
+            return None
+        if time.monotonic() * 1000.0 >= self._sticky_until_ms:
+            self._sticky_model_id = None
+            return None
+        return self._sticky_model_id
+
+    def remember_sticky(self, model_id: str) -> None:
+        """探路成功后锁定该模型。"""
+        self._sticky_model_id = model_id
+        self._sticky_until_ms = time.monotonic() * 1000.0 + self._sticky_ttl_ms
 
     # ==================== chat ====================
 
@@ -65,12 +88,15 @@ class RoutingLLMService:
     ) -> str:
         """严格对应 ragent chat(request, tier, preferredModelId)。"""
         thinking = bool(request.get("thinking", False))
-        targets = self._selector.select_chat_candidates(thinking, override, preferred_model_id)
+        # 粘性首选：未显式指定模型时，TTL 内直达上次探路成功的模型（探路一次，锁定使用）
+        effective_preferred = preferred_model_id or self.preferred_sticky_model()
+        targets = self._selector.select_chat_candidates(thinking, override, effective_preferred)
         return self._executor.execute_with_fallback(
             ModelCapability.CHAT,
             targets,
             client_resolver=self._resolve_client,
             caller=lambda client, target: client.do_chat(target, request),
+            on_success=None if preferred_model_id else (lambda t: self.remember_sticky(t.id)),
         )
 
     # ==================== stream ====================

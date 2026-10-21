@@ -81,7 +81,7 @@ class QueryRewriter:
         try:
             raw = await self.llm.chat(
                 self._messages(question, history),
-                temperature=0.3, top_p=0.6,
+                temperature=0.1, top_p=0.6,
             )
             return self._parse(raw, question)
         except LLMError as e:

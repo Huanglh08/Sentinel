@@ -18,6 +18,7 @@ import sys
 sys.path.insert(0, ".")
 
 from core.case.agent import CaseInvestigationAgent, _extract_json, _truncate  # noqa: E402
+from core.case import verdict as verdict_rules  # noqa: E402
 from core.case.store import CaseStore  # noqa: E402
 from core.case.types import SEVERITY_MALICIOUS  # noqa: E402
 
@@ -50,6 +51,10 @@ class FakeMCP:
     async def call(self, tool_id, arguments, timeout=None):
         self.calls.append((tool_id, arguments))
         return False, json.dumps({"events": [{"id": i, "region": arguments.get("region", "-")} for i in range(3)]}, ensure_ascii=False)
+
+
+# S6 独立信号抽取通道在 reporter 之前多调一次 LLM，每个到达报告阶段的用例都要补这一格
+_SIGNALS = json.dumps({"signals": []})
 
 
 def _extract_json_cases() -> None:
@@ -85,7 +90,8 @@ async def _happy_path() -> None:
             json.dumps({"thought": "试试别的", "action": "tool", "tool_id": "danger_action", "args": {}}),
             # finish
             '{"thought": "证据已足够", "action": "finish", "conclusion": "确认撞库"}',
-            # report
+            # signals -> report
+            _SIGNALS,
             json.dumps(
                 {
                     "conclusion": "malicious",
@@ -134,6 +140,7 @@ async def _duplicate_breaker() -> None:
         [
             json.dumps({"title": "t", "subject_type": "ip", "subject_id": "1.2.3.4", "priority": "P2", "severity_guess": "suspicious", "key_questions": [], "skill": "", "plan": []}, ensure_ascii=False),
             same, same, same,  # 第 3 次触发熔断
+            _SIGNALS,
             json.dumps({"conclusion": "inconclusive", "confidence": 0.1, "summary": "被熔断", "key_findings": [], "recommendations": [], "knowledge_distillation": ""}, ensure_ascii=False),
         ]
     )
@@ -153,6 +160,7 @@ async def _step_budget() -> None:
         [
             json.dumps({"title": "t", "subject_type": "order", "subject_id": "o1", "priority": "P3", "severity_guess": "suspicious", "key_questions": [], "skill": "", "plan": []}, ensure_ascii=False),
             tool, tool,
+            _SIGNALS,
             json.dumps({"conclusion": "malicious", "confidence": 0.9, "summary": "但调查未完成", "key_findings": [], "recommendations": [], "knowledge_distillation": ""}, ensure_ascii=False),
         ]
     )
@@ -163,11 +171,101 @@ async def _step_budget() -> None:
     print("[PASS] 步数预算")
 
 
+async def _alert_isolation() -> None:
+    """案件隔离：alert_id 由服务端注入取证工具，且覆盖模型自填值。"""
+    tool = json.dumps(
+        {"thought": "查工单", "action": "tool", "tool_id": "ticket_query",
+         "args": {"customer_name": "A88721", "alert_id": "MODEL_FAKE"}},
+        ensure_ascii=False,
+    )
+    llm = FakeLLM(
+        [
+            json.dumps({"title": "t", "subject_type": "account", "subject_id": "A88721", "priority": "P2", "severity_guess": "suspicious", "key_questions": [], "skill": "", "plan": []}, ensure_ascii=False),
+            tool,
+            '{"thought": "收尾", "action": "finish", "conclusion": "ok"}',
+            _SIGNALS,
+            json.dumps({"conclusion": "inconclusive", "confidence": 0.3, "summary": "s", "key_findings": [], "recommendations": [], "knowledge_distillation": ""}, ensure_ascii=False),
+        ]
+    )
+    mcp = FakeMCP()
+    agent = CaseInvestigationAgent(llm, mcp, store=_mem_store(), max_steps=3)
+    async for _ in agent.investigate("账号 A88721 存在异常登录", user_id="tester", alert_id="AL202406120001"):
+        pass
+    assert mcp.calls, "工具未被调用"
+    assert mcp.calls[0][1].get("alert_id") == "AL202406120001", mcp.calls[0]
+    assert mcp.calls[0][1].get("customer_name") == "A88721", mcp.calls[0]
+
+    # 未传 alert_id 时不注入（保持既有行为，避免给工具塞空值）
+    llm2 = FakeLLM(
+        [
+            json.dumps({"title": "t", "subject_type": "account", "subject_id": "A88721", "priority": "P2", "severity_guess": "suspicious", "key_questions": [], "skill": "", "plan": []}, ensure_ascii=False),
+            tool,
+            '{"thought": "收尾", "action": "finish", "conclusion": "ok"}',
+            _SIGNALS,
+            json.dumps({"conclusion": "inconclusive", "confidence": 0.3, "summary": "s", "key_findings": [], "recommendations": [], "knowledge_distillation": ""}, ensure_ascii=False),
+        ]
+    )
+    mcp2 = FakeMCP()
+    agent2 = CaseInvestigationAgent(llm2, mcp2, store=_mem_store(), max_steps=3)
+    async for _ in agent2.investigate("账号 A88721 存在异常登录", user_id="tester"):
+        pass
+    assert mcp2.calls[0][1].get("alert_id") == "MODEL_FAKE", mcp2.calls[0]
+    print("[PASS] 案件隔离 alert_id 注入")
+
+
+def _verdict_rules() -> None:
+    """规则表口径：双高危动作互证要升 malicious；单信号/有解释时不得升。"""
+    anomalies = [
+        {"id": "a1", "kind": "anomaly", "text": "全新Android设备从江苏南京IP登录", "severity": "normal", "source": "clue"},
+        {"id": "a2", "kind": "anomaly", "text": "登录后32分钟内改绑新手机号", "severity": "normal", "source": "clue"},
+    ]
+    absence = {"kind": "trusted", "text": "近7天无销售或订单记录", "covers": ["a1", "a2"], "tool_verified": True}
+
+    # 空结果 trusted 被过滤 + 评分 High → R7 升 malicious
+    d = verdict_rules.decide("suspicious", 0.65, anomalies + [absence], 85)
+    assert d and d.conclusion == "malicious" and d.rule == "R7", d
+    assert d.confidence >= 0.8, d
+
+    # 评分 Low → R6 降 inconclusive
+    d = verdict_rules.decide("suspicious", 0.6, anomalies[:1], 40)
+    assert d and d.conclusion == "inconclusive" and d.rule == "R6", d
+
+    # 可信解释只覆盖部分异常 → 不得降档（未解释的高危动作仍按行为链计数，High 仍升 malicious）
+    partial = {"kind": "trusted", "text": "已核实差旅报备闭环", "covers": ["a1"], "tool_verified": True}
+    d = verdict_rules.decide("suspicious", 0.6, anomalies + [partial], 85)
+    assert d and d.conclusion == "malicious" and d.rule == "R7", d
+
+    # 可信解释覆盖全部异常 → R3 降 inconclusive（评分不得越过它升档）
+    trusted = {"kind": "trusted", "text": "已核实差旅报备闭环", "covers": ["a1", "a2"], "tool_verified": True}
+    d = verdict_rules.decide("suspicious", 0.6, anomalies + [trusted], 85)
+    assert d and d.conclusion == "inconclusive" and d.rule == "R3", d
+
+    # R5：malicious 但评分 Low → 兜底 inconclusive
+    d = verdict_rules.decide("malicious", 0.9, anomalies[1:2], 40)
+    assert d and d.conclusion == "inconclusive", d
+
+    # 模型没给评分 → 不做档位改写
+    assert verdict_rules.decide("malicious", 0.9, anomalies, -1) is None
+
+    # 线索凭证与工具证据同等：全覆盖的可信解释即使 tool_verified=false 也不降级
+    clue_fact = {"kind": "trusted", "text": "公安实名核验通过（code:0，三要素一致）",
+                 "covers": ["a1"], "tool_verified": False}
+    d = verdict_rules.decide("benign", 0.9, anomalies[:1] + [clue_fact], 20)
+    assert d is None, d
+
+    # R8：benign 但评分 Medium → 不得结案
+    d = verdict_rules.decide("benign", 0.9, anomalies[:1], 60)
+    assert d and d.conclusion == "inconclusive" and d.rule == "R8", d
+    print("[PASS] 规则表 R5/R6/R7/R8")
+
+
 async def main() -> None:
     _extract_json_cases()
+    _verdict_rules()
     await _happy_path()
     await _duplicate_breaker()
     await _step_budget()
+    await _alert_isolation()
     print("\nALL CASE SMOKE TESTS PASSED")
 
 

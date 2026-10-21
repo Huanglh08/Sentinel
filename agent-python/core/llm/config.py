@@ -44,6 +44,8 @@ class ModelCandidate:
     temperature: float | None = None
     top_p: float | None = None
     max_tokens: int | None = None
+    # 追加到 chat/completions 请求体的候选级参数（如百炼 qwen3 系的 enable_thinking）
+    extra_body: dict[str, Any] | None = None
 
 
 @dataclass
@@ -79,29 +81,88 @@ class AIModelProperties:
 
     @classmethod
     def default_bailian(cls) -> "AIModelProperties":
-        """ragent 默认百炼配置，使用 DashScope OpenAI 兼容接口。"""
+        """ragent 默认配置，DashScope OpenAI 兼容接口 + 多候选降级链。
+
+        候选顺序 = tiers["standard"].candidates 顺序（ModelSelector 按序展开，
+        ModelRoutingExecutor 逐个尝试，失败换下一个，全部失败才抛 LLMError）：
+          1. siliconflow Qwen3-30B-A3B-Instruct-2507 首选（MoE 激活 3B，改写质量实测最优）
+          2. siliconflow Qwen2.5-72B-Instruct 质量兜底（贵，仅首选挂时使用）
+          3. bailian qwen-plus    跨 provider 备胎（DashScope RPM 按 model 维度计）
+          4. bailian qwen-turbo   末位备选（2026-10-14 起持续 429 限流，探针实锤，
+             曾因占链首每 5min sticky 过期白撞一次 429；恢复后也仅作末位）
+        """
         import os
 
-        model = "qwen-turbo"
+        candidates = [
+            ModelCandidate(
+                id="qwen3-30b-a3b-sf",
+                provider=ModelProvider.SILICON_FLOW,
+                model="Qwen/Qwen3-30B-A3B-Instruct-2507",
+                supports_thinking=False,
+                priority=0,
+            ),
+            ModelCandidate(
+                id="qwen25-72b-sf",
+                provider=ModelProvider.SILICON_FLOW,
+                model="Qwen/Qwen2.5-72B-Instruct",
+                supports_thinking=False,
+                priority=1,
+            ),
+            ModelCandidate(
+                id="qwen-plus",
+                provider=ModelProvider.BAI_LIAN,
+                model="qwen-plus",
+                supports_thinking=False,
+                priority=2,
+            ),
+            ModelCandidate(
+                id="qwen-turbo",
+                provider=ModelProvider.BAI_LIAN,
+                model="qwen-turbo",
+                supports_thinking=False,
+                priority=3,
+            ),
+        ]
+        # B' 收敛：AGENT_CHAT_MODEL 设置时 chat 链收敛为显式候选序（逗号分隔，主在前）。
+        # 模型切换视为部署变更（改 env + 重启），不做运行时静默扩池；
+        # 主失败按既有粘性路由落备用，属显式声明的容灾序而非漂移。
+        override_model = os.getenv("AGENT_CHAT_MODEL", "").strip()
+        if override_model:
+            override_models = [m.strip() for m in override_model.split(",") if m.strip()]
+            candidates = [
+                ModelCandidate(
+                    id="chat-primary" if i == 0 else f"chat-standby-{i}",
+                    provider=ModelProvider.BAI_LIAN,
+                    model=m,
+                    supports_thinking=False,
+                    # 百炼 qwen3 系默认输出思考内容，会耗尽输出限额导致正文为空；
+                    # 实测对 qwen-plus/flash 等非思考模型无害（参数被忽略）
+                    extra_body={"enable_thinking": False},
+                )
+                for i, m in enumerate(override_models)
+            ]
         return cls(
             providers={
                 "bailian": ProviderConfig(
                     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-                    api_key=os.getenv("BAILIAN_API_KEY") or os.getenv("DASHSCOPE_API_KEY") or "",
+                    api_key=os.getenv("BAILIAN_API_KEY")
+                    or os.getenv("DASHSCOPE_API_KEY")
+                    or "",
+                ),
+                "siliconflow": ProviderConfig(
+                    base_url="https://api.siliconflow.cn/v1",
+                    api_key=os.getenv("SILICONFLOW_API_KEY") or "",
                 ),
             },
             chat=ModelGroup(
-                candidates=[
-                    ModelCandidate(
-                        id=model,
-                        provider=ModelProvider.BAI_LIAN,
-                        model=model,
-                        supports_thinking=False,
-                        priority=0,
-                    ),
-                ],
+                candidates=candidates,
                 default_tier="standard",
-                tiers={"standard": TierConfig(candidates=[model], timeout_ms=60000)},
+                tiers={
+                    "standard": TierConfig(
+                        candidates=[c.id for c in candidates],
+                        timeout_ms=60000,
+                    ),
+                },
             ),
         )
 

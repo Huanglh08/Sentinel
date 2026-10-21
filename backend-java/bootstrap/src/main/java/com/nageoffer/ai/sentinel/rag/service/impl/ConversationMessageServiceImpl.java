@@ -23,15 +23,12 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.nageoffer.ai.sentinel.rag.controller.vo.ConversationMessageVO;
 import com.nageoffer.ai.sentinel.rag.dao.entity.ConversationDO;
 import com.nageoffer.ai.sentinel.rag.dao.entity.ConversationMessageDO;
-import com.nageoffer.ai.sentinel.rag.dao.entity.ConversationSummaryDO;
 import com.nageoffer.ai.sentinel.rag.dao.mapper.ConversationMapper;
 import com.nageoffer.ai.sentinel.rag.dao.mapper.ConversationMessageMapper;
-import com.nageoffer.ai.sentinel.rag.dao.mapper.ConversationSummaryMapper;
 import com.nageoffer.ai.sentinel.rag.enums.ConversationMessageOrder;
 import com.nageoffer.ai.sentinel.rag.service.MessageFeedbackService;
 import com.nageoffer.ai.sentinel.rag.service.ConversationMessageService;
 import com.nageoffer.ai.sentinel.rag.service.bo.ConversationMessageBO;
-import com.nageoffer.ai.sentinel.rag.service.bo.ConversationSummaryBO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -45,7 +42,6 @@ import java.util.Map;
 public class ConversationMessageServiceImpl implements ConversationMessageService {
 
     private final ConversationMessageMapper conversationMessageMapper;
-    private final ConversationSummaryMapper conversationSummaryMapper;
     private final ConversationMapper conversationMapper;
     private final MessageFeedbackService feedbackService;
 
@@ -115,11 +111,5 @@ public class ConversationMessageServiceImpl implements ConversationMessageServic
         }
 
         return result;
-    }
-
-    @Override
-    public void addMessageSummary(ConversationSummaryBO conversationSummary) {
-        ConversationSummaryDO conversationSummaryDO = BeanUtil.toBean(conversationSummary, ConversationSummaryDO.class);
-        conversationSummaryMapper.insert(conversationSummaryDO);
     }
 }

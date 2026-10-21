@@ -47,7 +47,7 @@ import java.util.function.Consumer;
  * <p>鏇夸唬鍘?sentinel 鏈�鍦� LLM / 妫�绱㈢紪鎺掞紝鎸?g2 鍒嗗眰鑱岃矗锛?
  * <ul>
  *   <li>{@link #streamChat} 杞�鍙� {@code POST /chat} 鐨?SSE 娴侊紙Java 澹抽�?token 閫忎紶锛?/li>
- *   <li>{@link #generateTitle} / {@link #recommend} / {@link #summarize} 杞�鍙� 3 涓�杈呭姪鎺ュ�?/li>
+ *   <li>{@link #generateTitle} / {@link #recommend} 杞�鍙� 3 涓�杈呭姪鎺ュ�?/li>
  * </ul>
  *
  * <p>鎵�鏈夋柟娉曞け璐ユ椂鎸夊師 sentinel 鐨勯檷绾ц��涔夎繑鍥烇紙鏍囬�樻埅鏂�/绌哄垪琛?鍘熸憳瑕侊級锛屼笉鎶涘嚭闃绘柇涓绘祦绋嬨�?
@@ -218,24 +218,6 @@ public class PythonAgentClient {
         return null;
     }
 
-    /**
-     * 浼氳瘽璁板繂鎽樿�併�傚け璐ヨ繑鍥?existingSummary銆?
-     */
-    public String summarize(List<Map<String, String>> messages, String existingSummary) {
-        try {
-            Map<String, Object> body = new java.util.LinkedHashMap<>();
-            body.put("messages", messages == null ? List.of() : messages);
-            body.put("existing_summary", existingSummary == null ? "" : existingSummary);
-            JsonNode node = postJson("/summarize", body);
-            String summary = node.path("summary").asText("").trim();
-            if (!summary.isEmpty()) {
-                return summary;
-            }
-        } catch (Exception e) {
-            log.warn("璋冪敤 Python /summarize 澶辫触", e);
-        }
-        return existingSummary == null ? "" : existingSummary;
-    }
 
     /**
      * 鏈嶅姟绔�浠诲姟鍙栨秷锛氶�氱煡 Python agent 鍋滄�㈡寚瀹� task銆?

@@ -22,7 +22,6 @@ import com.nageoffer.ai.sentinel.framework.web.Results;
 import com.nageoffer.ai.sentinel.infra.config.AIModelProperties;
 import com.nageoffer.ai.sentinel.rag.config.GraphProperties;
 import com.nageoffer.ai.sentinel.rag.config.KeywordProperties;
-import com.nageoffer.ai.sentinel.rag.config.MemoryProperties;
 import com.nageoffer.ai.sentinel.rag.config.OrchestrationProperties;
 import com.nageoffer.ai.sentinel.rag.config.RAGConfigProperties;
 import com.nageoffer.ai.sentinel.rag.config.RAGDefaultProperties;
@@ -62,7 +61,6 @@ public class RAGSettingsController {
     private final RagTraceProperties ragTraceProperties;
     private final SearchChannelProperties searchChannelProperties;
     private final RAGRateLimitProperties ragRateLimitProperties;
-    private final MemoryProperties memoryProperties;
     private final AIModelProperties aiModelProperties;
 
     @Value("${rag.vector.type:milvus}")
@@ -152,13 +150,6 @@ public class RAGSettingsController {
                                 .leaseSeconds(ragRateLimitProperties.getGlobalLeaseSeconds())
                                 .pollIntervalMs(ragRateLimitProperties.getGlobalPollIntervalMs())
                                 .build())
-                        .build())
-                .memory(SystemSettingsVO.MemorySettings.builder()
-                        .historyKeepTurns(memoryProperties.getHistoryKeepTurns())
-                        .summaryEnabled(memoryProperties.getSummaryEnabled())
-                        .summaryStartTurns(memoryProperties.getSummaryStartTurns())
-                        .summaryMaxChars(memoryProperties.getSummaryMaxChars())
-                        .titleMaxLength(memoryProperties.getTitleMaxLength())
                         .build())
                 .build();
     }

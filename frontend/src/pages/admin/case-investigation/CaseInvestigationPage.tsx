@@ -64,6 +64,13 @@ const CONCLUSION_VARIANT: Record<string, string> = {
   inconclusive: "bg-gray-100 text-gray-600"
 };
 
+// 未结案原因码 → 中文提示（后端 InvestigationReport.reason_code）
+const REASON_LABEL: Record<string, string> = {
+  INPUT_INSUFFICIENT: "线索不足",
+  EVIDENCE_INSUFFICIENT: "证据不足",
+  EVIDENCE_CONFLICT: "证据冲突"
+};
+
 const PRIORITY_VARIANT: Record<string, string> = {
   P0: "bg-red-100 text-red-700",
   P1: "bg-orange-100 text-orange-700",
@@ -273,6 +280,9 @@ export function CaseInvestigationPage() {
         key_findings?: { finding?: string; evidence_step?: number }[];
         recommendations?: { action?: string; requires_human_approval?: boolean }[];
         knowledge_distillation?: string;
+        // 未结案原因：INPUT_INSUFFICIENT / EVIDENCE_INSUFFICIENT / EVIDENCE_CONFLICT
+        reason_code?: string;
+        verdict_reason?: string;
       }
     | undefined;
 
@@ -577,6 +587,11 @@ export function CaseInvestigationPage() {
                   {typeof report.confidence === "number" ? ` · ${report.confidence}` : ""}
                 </Badge>
               )}
+              {report?.conclusion === "inconclusive" && report.reason_code && (
+                <Badge variant="outline" className="bg-amber-100 text-amber-700">
+                  {REASON_LABEL[report.reason_code] || report.reason_code}
+                </Badge>
+              )}
             </DialogTitle>
             <DialogDescription>{detail?.title}</DialogDescription>
           </DialogHeader>
@@ -598,6 +613,12 @@ export function CaseInvestigationPage() {
                 <div>
                   <div className="mb-1 font-medium">结论摘要</div>
                   <div className="rounded-md bg-gray-50 p-2 text-xs whitespace-pre-wrap">{report.summary}</div>
+                </div>
+              )}
+              {report?.conclusion === "inconclusive" && report.verdict_reason && (
+                <div>
+                  <div className="mb-1 font-medium">未结案原因</div>
+                  <div className="rounded-md bg-amber-50 p-2 text-xs whitespace-pre-wrap">{report.verdict_reason}</div>
                 </div>
               )}
               {!!report?.key_findings?.length && (

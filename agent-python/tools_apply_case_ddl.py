@@ -1,15 +1,19 @@
-"""一次性脚本：对 PG 执行案件调查 Phase 1 DDL（260829_case_investigation.sql）并验证建表。"""
+"""一次性脚本：对 PG 执行案件调查 DDL（建表 + 增量列）并验证结果。"""
 import sys
 from pathlib import Path
 
 from core.db import get_dsn, get_pool
 
-SQL_FILE = Path(__file__).resolve().parent.parent / "backend-java" / "resources" / "database" / "upgrades" / "v1.1.0" / "260829_case_investigation.sql"
+UPGRADES = Path(__file__).resolve().parent.parent / "backend-java" / "resources" / "database" / "upgrades" / "v1.1.0"
+SQL_FILES = (
+    UPGRADES / "260829_case_investigation.sql",
+    UPGRADES / "261018_case_evidence_status.sql",
+)
 
 
 def main() -> int:
-    sql = SQL_FILE.read_text(encoding="utf-8")
-    print(f"[1/3] DDL 文件读取成功: {SQL_FILE} ({len(sql)} chars)")
+    sql = "\n".join(f.read_text(encoding="utf-8") for f in SQL_FILES)
+    print(f"[1/3] DDL 文件读取成功: {len(SQL_FILES)} 个 / {len(sql)} chars")
 
     pool = get_pool()
     with pool.connection() as conn:
@@ -33,7 +37,7 @@ def main() -> int:
                 ).fetchall()
             ]
     print(f"[3/3] 验证: tables={names}, t_case_evidence columns={ev_cols}")
-    if set(names) == {"t_case", "t_case_evidence"} and len(ev_cols) == 11:
+    if set(names) == {"t_case", "t_case_evidence"} and {"tool_status", "record_count"} <= set(ev_cols):
         print("OK: DDL 执行并验证通过")
         return 0
     print("FAIL: 建表结果不符合预期", file=sys.stderr)

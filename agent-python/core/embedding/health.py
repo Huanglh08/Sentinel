@@ -22,8 +22,6 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 
-from core.embedding.errors import ModelClientError, ModelClientErrorType
-
 
 class CircuitState(str, Enum):
     """三态——严格对应 ragent ModelHealthStore.CircuitState。"""
@@ -59,12 +57,20 @@ class CallPermit:
 class ModelHealthStore:
     """模型级熔断器——严格对应 ragent ModelHealthStore。"""
 
-    def __init__(self, failure_threshold: int = 2, open_duration_ms: int = 30_000) -> None:
+    def __init__(
+        self,
+        failure_threshold: int = 2,
+        open_duration_ms: int = 30_000,
+        rate_limit_open_duration_ms: int = 300_000,
+    ) -> None:
         self._failure_threshold = failure_threshold
         self._open_duration_ms = open_duration_ms
+        # 限流(429/配额)类失败：短期不会恢复，冷却拉长，避免探针反复白撞
+        self._rate_limit_open_duration_ms = rate_limit_open_duration_ms
         self._lock = threading.RLock()
         self._failures: dict[str, int] = {}
         self._opened_at_ms: dict[str, float] = {}
+        self._open_reason: dict[str, str] = {}
         self._state: dict[str, CircuitState] = {}
         # 半开探测进行中标志（互斥）——严格对应 ragent halfOpenInFlight
         self._half_open_in_flight: dict[str, bool] = {}
@@ -100,7 +106,7 @@ class ModelHealthStore:
 
             # OPEN
             opened_at = self._opened_at_ms.get(model_id, 0.0)
-            if (time.monotonic() * 1000.0) - opened_at >= self._open_duration_ms:
+            if (time.monotonic() * 1000.0) - opened_at >= self._cooldown_ms(model_id):
                 # 超时，进入 HALF_OPEN
                 self._state[model_id] = CircuitState.HALF_OPEN
                 # 释放旧 inFlight（若有），分配新探针名额
@@ -129,6 +135,7 @@ class ModelHealthStore:
             self._failures[model_id] = 0
             self._opened_at_ms[model_id] = 0.0
             self._state[model_id] = CircuitState.CLOSED
+            self._open_reason[model_id] = ""
             self._half_open_in_flight[model_id] = False
 
     def record_failure(
@@ -147,17 +154,25 @@ class ModelHealthStore:
         with self._lock:
             is_probe = permit is not None and permit.half_open_token > 0
 
-            if isinstance(error, ModelClientError) and error.error_type == ModelClientErrorType.UNAUTHORIZED:
+            # duck-typing 取 error_type 的值：兼容 LLMError / ModelClientError（均为 str-Enum）
+            type_val = getattr(error, "error_type", None)
+            type_val = getattr(type_val, "value", type_val)
+
+            if type_val == "RATE_LIMITED":
+                # 限流(429/配额)：短期不会恢复，直接 OPEN + 长冷却，探针不再反复白撞
+                self._open(model_id, "RATE_LIMITED")
+                self._half_open_in_flight[model_id] = False
+                return
+
+            if type_val == "UNAUTHORIZED":
                 # 鉴权错：直接 OPEN（重试无意义），与 ragent 行为一致
-                self._state[model_id] = CircuitState.OPEN
-                self._opened_at_ms[model_id] = time.monotonic() * 1000.0
+                self._open(model_id, "GENERIC")
                 self._half_open_in_flight[model_id] = False
                 return
 
             if is_probe:
                 # 探针失败：立即 OPEN + 释放 inFlight（不再累加 failure_count）
-                self._state[model_id] = CircuitState.OPEN
-                self._opened_at_ms[model_id] = time.monotonic() * 1000.0
+                self._open(model_id, "GENERIC")
                 self._half_open_in_flight[model_id] = False
                 return
 
@@ -165,8 +180,7 @@ class ModelHealthStore:
             count = self._failures.get(model_id, 0) + 1
             self._failures[model_id] = count
             if count >= self._failure_threshold:
-                self._state[model_id] = CircuitState.OPEN
-                self._opened_at_ms[model_id] = time.monotonic() * 1000.0
+                self._open(model_id, "GENERIC")
 
     def is_unavailable(self, model_id: str) -> bool:
         """严格对应 ragent ModelHealthStore.isUnavailable(modelId)。
@@ -180,10 +194,22 @@ class ModelHealthStore:
             state = self._state.get(model_id, CircuitState.CLOSED)
             if state == CircuitState.OPEN:
                 opened_at = self._opened_at_ms.get(model_id, 0.0)
-                return (time.monotonic() * 1000.0) - opened_at < self._open_duration_ms
+                return (time.monotonic() * 1000.0) - opened_at < self._cooldown_ms(model_id)
             if state == CircuitState.HALF_OPEN:
                 return self._half_open_in_flight.get(model_id, False)
             return False
+
+    def _open(self, model_id: str, reason: str) -> None:
+        """进入 OPEN 并记录打开原因（冷却时长按原因区分）。"""
+        self._state[model_id] = CircuitState.OPEN
+        self._opened_at_ms[model_id] = time.monotonic() * 1000.0
+        self._open_reason[model_id] = reason
+
+    def _cooldown_ms(self, model_id: str) -> float:
+        """OPEN 冷却时长：限流类用长冷却，其余用默认。"""
+        if self._open_reason.get(model_id) == "RATE_LIMITED":
+            return float(self._rate_limit_open_duration_ms)
+        return float(self._open_duration_ms)
 
     def state(self, model_id: str) -> CircuitState:
         """读状态（用于调试/指标）。"""
@@ -196,4 +222,5 @@ class ModelHealthStore:
             self._failures[model_id] = 0
             self._opened_at_ms[model_id] = 0.0
             self._state[model_id] = CircuitState.CLOSED
+            self._open_reason[model_id] = ""
             self._half_open_in_flight[model_id] = False

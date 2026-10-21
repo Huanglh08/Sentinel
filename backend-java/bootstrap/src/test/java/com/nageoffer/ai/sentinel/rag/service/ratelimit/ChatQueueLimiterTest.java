@@ -19,10 +19,10 @@ package com.nageoffer.ai.sentinel.rag.service.ratelimit;
 
 import com.nageoffer.ai.sentinel.framework.context.LoginUser;
 import com.nageoffer.ai.sentinel.framework.context.UserContext;
-import com.nageoffer.ai.sentinel.rag.config.MemoryProperties;
 import com.nageoffer.ai.sentinel.rag.config.RAGRateLimitProperties;
-import com.nageoffer.ai.sentinel.rag.core.memory.ConversationMemoryService;
 import com.nageoffer.ai.sentinel.rag.service.ConversationGroupService;
+import com.nageoffer.ai.sentinel.rag.service.ConversationMessageService;
+import com.nageoffer.ai.sentinel.rag.service.ConversationService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -86,7 +86,10 @@ class ChatQueueLimiterTest {
     private RTopic topic;
 
     @Mock
-    private ConversationMemoryService memoryService;
+    private ConversationMessageService conversationMessageService;
+
+    @Mock
+    private ConversationService conversationService;
 
     @Mock
     private ConversationGroupService conversationGroupService;
@@ -111,16 +114,13 @@ class ChatQueueLimiterTest {
         rateLimitProperties.setGlobalEnabled(true);
         rateLimitProperties.setGlobalMaxWaitSeconds(1);
 
-        MemoryProperties memoryProperties = new MemoryProperties();
-        memoryProperties.setTitleMaxLength(30);
-
         chatQueueLimiter = new ChatQueueLimiter(
                 rateLimiter,
                 Runnable::run,
                 rateLimitProperties,
-                memoryService,
-                conversationGroupService,
-                memoryProperties);
+                conversationMessageService,
+                conversationService,
+                conversationGroupService);
     }
 
     @AfterEach
@@ -164,7 +164,7 @@ class ChatQueueLimiterTest {
         doAnswer(invocation -> {
             memoryWritten.countDown();
             return "message-1";
-        }).when(memoryService).append(anyString(), eq(USER_ID), any());
+        }).when(conversationMessageService).addMessage(any());
         setUserContext();
 
         chatQueueLimiter.enqueue("排队问题", null, new SseEmitter(), () -> {
@@ -172,7 +172,7 @@ class ChatQueueLimiterTest {
         UserContext.clear();
 
         assertTrue(memoryWritten.await(3, TimeUnit.SECONDS));
-        verify(memoryService, times(2)).append(anyString(), eq(USER_ID), any());
+        verify(conversationMessageService, times(2)).addMessage(any());
     }
 
     private static void setUserContext() {

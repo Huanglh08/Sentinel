@@ -21,10 +21,8 @@ import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.nageoffer.ai.sentinel.rag.dao.entity.ConversationDO;
 import com.nageoffer.ai.sentinel.rag.dao.entity.ConversationMessageDO;
-import com.nageoffer.ai.sentinel.rag.dao.entity.ConversationSummaryDO;
 import com.nageoffer.ai.sentinel.rag.dao.mapper.ConversationMapper;
 import com.nageoffer.ai.sentinel.rag.dao.mapper.ConversationMessageMapper;
-import com.nageoffer.ai.sentinel.rag.dao.mapper.ConversationSummaryMapper;
 import com.nageoffer.ai.sentinel.rag.service.ConversationGroupService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -36,7 +34,6 @@ import java.util.List;
 public class ConversationGroupServiceImpl implements ConversationGroupService {
 
     private final ConversationMessageMapper messageMapper;
-    private final ConversationSummaryMapper summaryMapper;
     private final ConversationMapper conversationMapper;
 
     @Override
@@ -52,27 +49,6 @@ public class ConversationGroupServiceImpl implements ConversationGroupService {
                         .eq(ConversationMessageDO::getDeleted, 0)
                         .orderByDesc(ConversationMessageDO::getCreateTime)
                         .last("limit " + limit)
-        );
-    }
-
-    @Override
-    public List<ConversationMessageDO> listMessagesBetweenIds(String conversationId, String userId, String afterId, String beforeId) {
-        if (StrUtil.isBlank(conversationId) || StrUtil.isBlank(userId)) {
-            return List.of();
-        }
-        var query = Wrappers.lambdaQuery(ConversationMessageDO.class)
-                .eq(ConversationMessageDO::getConversationId, conversationId)
-                .eq(ConversationMessageDO::getUserId, userId)
-                .in(ConversationMessageDO::getRole, "user", "assistant")
-                .eq(ConversationMessageDO::getDeleted, 0);
-        if (afterId != null) {
-            query.gt(ConversationMessageDO::getId, afterId);
-        }
-        if (beforeId != null) {
-            query.lt(ConversationMessageDO::getId, beforeId);
-        }
-        return messageMapper.selectList(
-                query.orderByAsc(ConversationMessageDO::getId)
         );
     }
 
@@ -104,21 +80,6 @@ public class ConversationGroupServiceImpl implements ConversationGroupService {
                         .eq(ConversationMessageDO::getUserId, userId)
                         .eq(ConversationMessageDO::getRole, "user")
                         .eq(ConversationMessageDO::getDeleted, 0)
-        );
-    }
-
-    @Override
-    public ConversationSummaryDO findLatestSummary(String conversationId, String userId) {
-        if (StrUtil.isBlank(conversationId) || StrUtil.isBlank(userId)) {
-            return null;
-        }
-        return summaryMapper.selectOne(
-                Wrappers.lambdaQuery(ConversationSummaryDO.class)
-                        .eq(ConversationSummaryDO::getConversationId, conversationId)
-                        .eq(ConversationSummaryDO::getUserId, userId)
-                        .eq(ConversationSummaryDO::getDeleted, 0)
-                        .orderByDesc(ConversationSummaryDO::getId)
-                        .last("limit 1")
         );
     }
 

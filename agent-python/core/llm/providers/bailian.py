@@ -13,7 +13,12 @@ class BaiLianLLMService(OpenAIStyleLLMService):
     DEFAULT_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     DEFAULT_MODEL: str = "qwen-turbo"
 
-    def __init__(self, api_key: str | None = None, model: str | None = None, timeout: float = 60.0) -> None:
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str | None = None,
+        timeout: float = 60.0,
+    ) -> None:
         super().__init__(
             base_url=self.DEFAULT_BASE_URL,
             api_key=api_key or os.getenv("BAILIAN_API_KEY") or os.getenv("DASHSCOPE_API_KEY"),

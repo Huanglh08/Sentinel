@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from abc import ABC, abstractmethod
 from typing import Any, AsyncIterator
@@ -18,6 +19,8 @@ from core.llm.errors import LLMError, LLMErrorType
 from core.llm.model_target import ModelTarget
 from core.llm.routing_executor import ModelRoutingExecutor
 from core.llm.routing_service import RoutingLLMService
+
+logger = logging.getLogger(__name__)
 from core.llm.selector import ModelSelector
 from core.llm.streaming import OpenAIStyleSseParser, ProbeStreamBridge
 
@@ -83,6 +86,7 @@ class OpenAIStyleLLMService(LLMService):
         temperature: float = 0.1,
         top_p: float = 0.3,
         max_tokens: int = 1024,
+        extra_body: dict | None = None,
     ) -> str:
         """单次非流式——严格对齐 ragent AbstractOpenAIStyleChatClient.doChat。"""
         payload = {
@@ -93,12 +97,24 @@ class OpenAIStyleLLMService(LLMService):
             "max_tokens": max_tokens,
             "stream": False,
         }
+        payload.update(extra_body or {})
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 resp = await client.post(self._url(), json=payload, headers=self._headers())
                 resp.raise_for_status()
                 data = resp.json()
-                return data["choices"][0]["message"]["content"]
+                choice = data["choices"][0]
+                content = choice["message"]["content"] or ""
+                # 诊断：finish_reason/usage 落日志，截断与思考挤占一眼可辨
+                usage = data.get("usage") or {}
+                logger.info(
+                    "[llm-chat] model=%s finish=%s completion=%s reasoning=%s content_len=%d",
+                    self.model, choice.get("finish_reason"),
+                    usage.get("completion_tokens"),
+                    (usage.get("completion_tokens_details") or {}).get("reasoning_tokens"),
+                    len(content),
+                )
+                return content
         except httpx.HTTPStatusError as e:
             raise LLMError(
                 f"LLM chat 失败: {e.response.status_code}",
@@ -119,6 +135,7 @@ class OpenAIStyleLLMService(LLMService):
         temperature: float = 0.3,
         top_p: float = 0.9,
         max_tokens: int = 2048,
+        extra_body: dict | None = None,
     ) -> AsyncIterator[dict]:
         """流式——严格对齐 ragent AbstractOpenAIStyleChatClient.doStream。
 
@@ -134,6 +151,7 @@ class OpenAIStyleLLMService(LLMService):
             "max_tokens": max_tokens,
             "stream": True,
         }
+        payload.update(extra_body or {})
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 async with client.stream(
@@ -168,10 +186,29 @@ class OpenAIStyleLLMService(LLMService):
 # 向后兼容
     def do_chat(self, target, request) -> str:
         url = f"{target.provider.base_url.rstrip('/')}/chat/completions"
-        with httpx.Client(timeout=60.0) as c:
-            r = c.post(url, json={"model": target.candidate.model or target.id, "messages": request.get("messages", []), "stream": False}, headers=self._headers())
-            r.raise_for_status()
-            return r.json()["choices"][0]["message"]["content"]
+        payload = {"model": target.candidate.model or target.id, "messages": request.get("messages", []), "stream": False}
+        # 采样参数透传（与 stream() 同款三元组）——agent 判案链 temperature=0.0 依赖此生效
+        payload.update({k: request[k] for k in ("temperature", "top_p", "max_tokens") if k in request})
+        # 候选级请求参数（如百炼 qwen3 系 enable_thinking=false）
+        payload.update(getattr(target.candidate, "extra_body", None) or {})
+        try:
+            with httpx.Client(timeout=60.0) as c:
+                r = c.post(url, json=payload, headers=self._headers())
+                r.raise_for_status()
+                return r.json()["choices"][0]["message"]["content"]
+        except httpx.HTTPStatusError as e:
+            # 包装成 LLMError 携带错误类型（429 → RATE_LIMITED），熔断器据此走长冷却
+            raise LLMError(
+                f"LLM chat 失败: {e.response.status_code}",
+                error_type=LLMErrorType.from_http_status(e.response.status_code),
+                cause=e,
+            ) from e
+        except Exception as e:  # noqa: BLE001
+            raise LLMError(
+                f"LLM chat 调用失败: {e}",
+                error_type=LLMErrorType.NETWORK_ERROR,
+                cause=e,
+            ) from e
 
 
 class AsyncRoutingLLMService(LLMService):
@@ -187,7 +224,8 @@ class AsyncRoutingLLMService(LLMService):
     async def stream(self, messages: list[dict], **kwargs: Any) -> AsyncIterator[dict]:
         request = {"messages": messages, **kwargs}
         thinking = bool(request.get("thinking", False))
-        targets = self.routing._selector.select_chat_candidates(thinking, None, None)
+        sticky = self.routing.preferred_sticky_model()
+        targets = self.routing._selector.select_chat_candidates(thinking, None, sticky)
         health = self.routing._executor._health_store
         last_error: Exception | None = None
         for target in targets:
@@ -207,6 +245,7 @@ class AsyncRoutingLLMService(LLMService):
                         temperature=kwargs.get("temperature", 0.1),
                         top_p=kwargs.get("top_p", 0.9),
                         max_tokens=kwargs.get("max_tokens", 2048),
+                        extra_body=getattr(target.candidate, "extra_body", None),
                     ):
                         await queue.put(token)
                     await queue.put(None)
@@ -221,6 +260,7 @@ class AsyncRoutingLLMService(LLMService):
                         raise item
                     if item is None:
                         health.record_success(target.id, permit)
+                        self.routing.remember_sticky(target.id)
                         break
                     first_token = True
                     yield item

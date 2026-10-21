@@ -15,6 +15,6 @@ if (-not $env:SENTINEL_PYTHON_API_KEY) { Write-Warning 'SENTINEL_PYTHON_API_KEY 
 
 $p = Start-Process -FilePath $java -ArgumentList @('-jar', $jar) `
     -WorkingDirectory $wd -WindowStyle Hidden -PassThru `
-    -RedirectStandardOutput (Join-Path $wd '_gateway_run.log') `
-    -RedirectStandardError (Join-Path $wd '_gateway_run.err.log')
+    -RedirectStandardOutput (Join-Path $wd 'logs\gateway_run.log') `
+    -RedirectStandardError (Join-Path $wd 'logs\gateway_run.err.log')
 Write-Output ("gateway pid=" + $p.Id)

@@ -86,3 +86,6 @@ agent-python/eval/reports/
 node_modules/
 .codebuddy/
 .playwright-cli/
+
+# 长任务运行时状态（tools/task）
+.sentinel/

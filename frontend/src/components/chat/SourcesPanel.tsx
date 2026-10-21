@@ -43,17 +43,17 @@ export function SourcesPanel() {
     <aside
       className={cn(
         "h-full shrink-0 overflow-hidden transition-[width] duration-300 ease-out",
-        open ? "w-[380px] border-l border-[#EFEFEF]" : "w-0"
+        open ? "w-[380px] border-l border-white/10" : "w-0"
       )}
       aria-hidden={!open}
     >
-      <div className="flex h-full w-[380px] flex-col bg-white">
-        <div className="flex items-center justify-between border-b border-[#F0F0F0] px-5 py-4">
-          <span className="text-[15px] font-semibold text-[#1A1A1A]">参考来源 ({shownSources.length})</span>
+      <div className="flex h-full w-[380px] flex-col bg-slate-900/95">
+        <div className="flex items-center justify-between border-b border-white/10 px-5 py-4">
+          <span className="text-[15px] font-semibold text-slate-100">参考来源 ({shownSources.length})</span>
           <button
             type="button"
             onClick={closeSourcesPanel}
-            className="rounded-full p-1.5 text-[#999999] transition-colors hover:bg-[#F5F5F5] hover:text-[#666666]"
+            className="rounded-full p-1.5 text-slate-400 transition-colors hover:bg-white/10 hover:text-slate-200"
             aria-label="关闭"
           >
             <X className="h-4 w-4" />
@@ -68,24 +68,24 @@ export function SourcesPanel() {
                   type="button"
                   onClick={() => openSource(source)}
                   title={source.docName || "查看来源"}
-                  className="w-full rounded-xl p-3 text-left transition-all hover:bg-white hover:shadow-[0_2px_12px_rgba(0,0,0,0.06)]"
+                  className="w-full rounded-xl p-3 text-left transition-all hover:bg-white/5"
                 >
                   <div className="flex items-start gap-2.5">
-                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-[#EDEDED] text-[11px] font-medium text-[#666666]">
+                    <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-white/10 text-[11px] font-medium text-slate-300">
                       {source.index ?? idx + 1}
                     </span>
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium text-[#1A1A1A]">
+                      <div className="truncate text-sm font-medium text-slate-100">
                         {source.docName || "未命名文档"}
                       </div>
-                      <div className="mt-1 flex items-center gap-1.5 text-xs text-[#9AA0A6]">
+                      <div className="mt-1 flex items-center gap-1.5 text-xs text-slate-400">
                         <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
                           <SourceIcon source={source} className="h-3.5 w-3.5" />
                         </span>
                         <span className="truncate">{sourceSite(source)}</span>
                       </div>
                       {source.excerpt ? (
-                        <p className="mt-2 line-clamp-3 text-xs leading-relaxed text-[#8A8F94]">
+                        <p className="mt-2 line-clamp-3 text-xs leading-relaxed text-slate-400">
                           {source.excerpt}
                         </p>
                       ) : null}

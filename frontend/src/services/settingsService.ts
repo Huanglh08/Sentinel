@@ -78,13 +78,6 @@ export interface SystemSettings {
         pollIntervalMs: number;
       };
     };
-    memory: {
-      historyKeepTurns: number;
-      summaryStartTurns: number;
-      summaryEnabled: boolean;
-      summaryMaxChars: number;
-      titleMaxLength: number;
-    };
   };
   ai: {
     providers: Record<

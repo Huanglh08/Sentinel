@@ -110,9 +110,11 @@ class CasePatroller:
                 if isinstance(item, dict):
                     clue_text = str(item.get("clue", ""))
                     source = str(item.get("source", "PATROL"))
+                    alert_id = str(item.get("alert_id", ""))
                 else:
                     clue_text = str(item)
                     source = "PATROL"
+                    alert_id = ""
                 if not clue_text.strip():
                     continue
                 fp = self.fingerprint(source, clue_text)
@@ -125,7 +127,7 @@ class CasePatroller:
                 events: list[dict] = []
                 try:
                     async for ev in self.agent.investigate(
-                        clue_text, user_id="patrol", source=source, fingerprint=fp
+                        clue_text, user_id="patrol", source=source, fingerprint=fp, alert_id=alert_id
                     ):
                         events.append(ev)
                 except Exception:  # noqa: BLE001

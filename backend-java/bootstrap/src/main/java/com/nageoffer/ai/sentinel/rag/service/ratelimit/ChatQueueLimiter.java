@@ -25,20 +25,24 @@ import com.nageoffer.ai.sentinel.framework.convention.ChatMessage;
 import com.nageoffer.ai.sentinel.framework.context.UserContext;
 import com.nageoffer.ai.sentinel.rag.service.ratelimit.FairDistributedRateLimiter.AcquireRequest;
 import com.nageoffer.ai.sentinel.framework.web.SseEmitterSender;
-import com.nageoffer.ai.sentinel.rag.config.MemoryProperties;
 import com.nageoffer.ai.sentinel.rag.config.RAGRateLimitProperties;
-import com.nageoffer.ai.sentinel.rag.core.memory.ConversationMemoryService;
 import com.nageoffer.ai.sentinel.rag.dto.CompletionPayload;
 import com.nageoffer.ai.sentinel.rag.dto.MessageDelta;
 import com.nageoffer.ai.sentinel.rag.dto.MetaPayload;
 import com.nageoffer.ai.sentinel.rag.enums.SSEEventType;
 import com.nageoffer.ai.sentinel.rag.service.ConversationGroupService;
+import com.nageoffer.ai.sentinel.rag.service.ConversationMessageService;
+import com.nageoffer.ai.sentinel.rag.service.ConversationService;
+import com.nageoffer.ai.sentinel.rag.service.bo.ConversationCreateBO;
+import com.nageoffer.ai.sentinel.rag.service.bo.ConversationMessageBO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.logging.log4j.util.Strings;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.util.Date;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -57,9 +61,12 @@ public class ChatQueueLimiter {
     private final FairDistributedRateLimiter chatRateLimiter;
     private final Executor chatEntryExecutor;
     private final RAGRateLimitProperties rateLimitProperties;
-    private final ConversationMemoryService memoryService;
+    private final ConversationMessageService conversationMessageService;
+    private final ConversationService conversationService;
     private final ConversationGroupService conversationGroupService;
-    private final MemoryProperties memoryProperties;
+
+    @Value("${rag.conversation.title-max-length:30}")
+    private int titleMaxLength;
 
     public void enqueue(String question, String conversationId, SseEmitter emitter, Runnable onAcquire) {
         if (!Boolean.TRUE.equals(rateLimitProperties.getGlobalEnabled())) {
@@ -114,11 +121,11 @@ public class ChatQueueLimiter {
             isNewConversation = conversationGroupService.findConversation(actualConversationId, userId) == null;
         }
 
-        String questionMessageId = memoryService.append(actualConversationId, userId, ChatMessage.user(question));
+        String questionMessageId = appendMessage(actualConversationId, userId, ChatMessage.user(question));
         ChatMessage rejectedMessage = ChatMessage.assistant(REJECT_MESSAGE);
         rejectedMessage.setReplyToMessageId(questionMessageId);
         rejectedMessage.setMessageStatus(ChatMessage.MessageStatus.REJECTED);
-        String messageId = memoryService.append(actualConversationId, userId, rejectedMessage);
+        String messageId = appendMessage(actualConversationId, userId, rejectedMessage);
 
         String title = Strings.EMPTY;
         if (isNewConversation) {
@@ -137,9 +144,39 @@ public class ChatQueueLimiter {
         if (StrUtil.isBlank(question)) {
             return Strings.EMPTY;
         }
-        int maxLen = memoryProperties.getTitleMaxLength() != null ? memoryProperties.getTitleMaxLength() : 30;
+        int maxLen = titleMaxLength > 0 ? titleMaxLength : 30;
         String cleaned = question.trim();
         return cleaned.length() <= maxLen ? cleaned : cleaned.substring(0, maxLen);
+    }
+
+    /**
+     * 消息持久化（原 ConversationMemoryStore.append 的落库部分内联）：
+     * 写消息 + 首条用户消息时创建/更新会话记录（标题由 ConversationService 内部生成）。
+     */
+    private String appendMessage(String conversationId, String userId, ChatMessage message) {
+        ConversationMessageBO conversationMessage = ConversationMessageBO.builder()
+                .conversationId(conversationId)
+                .userId(userId)
+                .role(message.getRole().name().toLowerCase())
+                .content(message.getContent())
+                .thinkingContent(message.getThinkingContent())
+                .thinkingDuration(message.getThinkingDuration())
+                .sources(message.getSources())
+                .retrievedChunks(message.getRetrievedChunks())
+                .replyToMessageId(message.getReplyToMessageId())
+                .messageStatus(message.getMessageStatus() == null ? null : message.getMessageStatus().name())
+                .build();
+        String messageId = conversationMessageService.addMessage(conversationMessage);
+        if (message.getRole() == ChatMessage.Role.USER) {
+            ConversationCreateBO conversation = ConversationCreateBO.builder()
+                    .conversationId(conversationId)
+                    .userId(userId)
+                    .question(message.getContent())
+                    .lastTime(new Date())
+                    .build();
+            conversationService.createOrUpdate(conversation);
+        }
+        return messageId;
     }
 
     private void sendRejectEvents(SseEmitter emitter, RejectedContext rejectedContext) {

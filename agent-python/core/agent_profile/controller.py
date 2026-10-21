@@ -1,13 +1,13 @@
 """智能体管理控制器：1:1 翻译 ragent AgentProfileController（FastAPI 路由）。"""
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
 
 from core.agent_profile.cache import AgentPromptCacheManager
 from core.agent_profile.repository import AgentPromptRepository, AgentProfileRepository
 from core.agent_profile.resolver import AgentPromptResolver
-from core.agent_profile.service import AgentProfileAdminService, ClientException
+from core.agent_profile.service import AgentProfileAdminService
 
 
 class AgentProfileSaveRequest(BaseModel):
@@ -68,8 +68,3 @@ def build_router() -> APIRouter:
         return _service().default_prompt(slot_key)
 
     return router
-
-
-# 统一把 ClientException 映射为 400
-def _client_exception_handler(request, exc: ClientException):
-    return HTTPException(status_code=400, detail=str(exc))

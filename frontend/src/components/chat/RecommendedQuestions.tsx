@@ -28,10 +28,10 @@ export function RecommendedQuestions({ message }: RecommendedQuestionsProps) {
   // 面板内联展开于消息内，不主动滚动：虚拟列表（react-virtuoso）里调用原生 scrollIntoView 会打乱其滚动记账、
   // 导致条目错位与空白区域，展开后若超出视口由用户自行下滑
   return (
-    <div className="animate-fade-up overflow-hidden rounded-2xl border border-[#EFEFEF] bg-[#FAFAFA] p-1.5">
+    <div className="animate-fade-up overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04] p-1.5">
       <div className="flex items-center gap-1.5 px-2.5 pt-1.5 pb-1">
-        <Sparkles className="h-3.5 w-3.5 text-[#3B82F6]" />
-        <span className="text-xs font-medium text-[#666666]">猜你想问</span>
+        <Sparkles className="h-3.5 w-3.5 text-[#22D3EE]" />
+        <span className="text-xs font-medium text-slate-400">猜你想问</span>
       </div>
 
       {state === "loading" ? (
@@ -39,7 +39,7 @@ export function RecommendedQuestions({ message }: RecommendedQuestionsProps) {
           {[68, 52, 60].map((width, idx) => (
             <li key={idx} className="px-3 py-2.5">
               <div
-                className="h-3.5 rounded-full bg-[#ECECEC] animate-pulse"
+                className="h-3.5 rounded-full bg-white/10 animate-pulse"
                 style={{ width: `${width}%` }}
               />
             </li>
@@ -49,11 +49,11 @@ export function RecommendedQuestions({ message }: RecommendedQuestionsProps) {
 
       {state === "error" ? (
         <div className="flex items-center justify-between gap-3 px-3 py-2.5">
-          <span className="text-sm text-[#999999]">推荐问题加载失败</span>
+          <span className="text-sm text-slate-500">推荐问题加载失败</span>
           <button
             type="button"
             onClick={() => loadRecommended(message.id)}
-            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-[#2563EB] transition-colors hover:bg-[#EAF1FF]"
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-blue-400 transition-colors hover:bg-blue-400/10"
           >
             <RotateCw className="h-3 w-3" />
             重试
@@ -62,7 +62,7 @@ export function RecommendedQuestions({ message }: RecommendedQuestionsProps) {
       ) : null}
 
       {state === "ready" && questions.length === 0 ? (
-        <div className="px-3 py-2.5 text-sm text-[#999999]">暂无推荐问题</div>
+        <div className="px-3 py-2.5 text-sm text-slate-500">暂无推荐问题</div>
       ) : null}
 
       {state === "ready" && questions.length > 0 ? (
@@ -86,14 +86,14 @@ export function RecommendedQuestions({ message }: RecommendedQuestionsProps) {
                   "group/rq flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left transition-all",
                   isStreaming
                     ? "cursor-not-allowed opacity-50"
-                    : "hover:bg-white hover:shadow-[0_2px_10px_rgba(0,0,0,0.05)]"
+                    : "hover:bg-white/5"
                 )}
               >
-                <span className="flex-1 text-sm leading-relaxed text-[#4A4A4A] transition-colors group-hover/rq:text-[#1A1A1A]">
+                <span className="flex-1 text-sm leading-relaxed text-slate-300 transition-colors group-hover/rq:text-slate-100">
                   {question}
                 </span>
                 <ArrowUpRight
-                  className="h-4 w-4 shrink-0 -translate-x-1 text-[#C4C4C4] opacity-0 transition-all group-hover/rq:translate-x-0 group-hover/rq:text-[#3B82F6] group-hover/rq:opacity-100"
+                  className="h-4 w-4 shrink-0 -translate-x-1 text-slate-500 opacity-0 transition-all group-hover/rq:translate-x-0 group-hover/rq:text-[#22D3EE] group-hover/rq:opacity-100"
                   aria-hidden="true"
                 />
               </button>

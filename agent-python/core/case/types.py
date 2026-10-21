@@ -87,6 +87,9 @@ class EvidenceStep:
     observation: str = ""
     is_error: bool = False
     injection_suspected: bool = False  # 工具观察值中检测到间接注入指令（已消毒，留痕审计）
+    tool_status: str = ""  # 结构化工具状态：hit | miss | error | unsupported | ""
+    record_count: int = 0
+    data_summary: dict = field(default_factory=dict)  # 工具侧数据比对摘要（样本天数/偏离倍数/normal）
     elapsed_ms: int = 0
     create_time: str = ""
 
@@ -106,6 +109,9 @@ class TriageResult:
     key_questions: list[str] = field(default_factory=list)
     skill: str = ""  # 匹配到的 SOP 技能名（可为空）
     plan: list[str] = field(default_factory=list)
+    # 输入完备性：{sufficient: bool, missing: [...], conflicts: [...]}
+    # sufficient=False 时链路在分诊后直接返回"请补充线索"，不进调查（对齐 SC 无实体 Terminate）
+    input_quality: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -117,10 +123,25 @@ class InvestigationReport:
 
     conclusion: str = SEVERITY_INCONCLUSIVE
     confidence: float = 0.0
+    # 风险评分（0-100），口径对齐 SC InvestigateFailedSignins：
+    # 0-30 Neutral / 30-50 Low / 50-74 Medium / >75 High。-1 = 模型未给出。
+    risk_score: int = -1
     summary: str = ""
     key_findings: list[dict] = field(default_factory=list)  # [{finding, evidence_step}]
+    # 覆盖关系（机器校验）：risk_signals 每条都要有 explained_by，才允许判 benign
+    coverage: dict = field(default_factory=dict)  # {risk_signals: [...], benign_facts_verified: [...]}
+    # S6 结构化证据（模型逐条抽取，规则表 core/case/verdict.py 的唯一输入）：
+    #   anomaly: {id, kind, text, severity: high|normal, source: clue|tool|authority}
+    #   trusted: {kind, text, covers: [anomaly_id], tool_verified: bool}
+    signals: list[dict] = field(default_factory=list)
     recommendations: list[dict] = field(default_factory=list)  # [{action, requires_human_approval, reason}]
     knowledge_distillation: str = ""  # 可沉淀回知识库的经验
+    verdict_reason: str = ""  # 裁决规则把 benign 降级的原因（未结案原因，供分析师与评测查看）
+    # 未结案原因分类（决定给用户什么提示、下一步该谁做什么）：
+    #   INPUT_INSUFFICIENT  线索缺主体/自相矛盾 → 让用户补线索，不进调查
+    #   EVIDENCE_INSUFFICIENT 查过了但没拿到有效证据/良性依据不足 → 交人工或补数据源
+    #   EVIDENCE_CONFLICT     有异常信号但解释不全 → 交人工
+    reason_code: str = ""
     raw: str = ""  # LLM 原始输出（审计用）
 
     def to_dict(self) -> dict:

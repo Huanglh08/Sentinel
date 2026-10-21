@@ -48,6 +48,7 @@ from core.source import CitationContextEnricher, SourceRef, SourcesAssembler
 from core.guard import InputGuard, OutputGuard, TrajectoryAuditor, TRAJECTORY_CONSTRAINTS
 from core.guard.hardening import HARDENING_RULES
 from core.guard.rules import GUARD_ENABLED
+from core.session_memory import MemoryDeltaFilter, build_state_card_prompt
 
 
 _logger = logging.getLogger(__name__)
@@ -329,23 +330,35 @@ class Agent:
                         _m["content"] = str(_m.get("content") or "") + _traj_constraints
 
         # 8) 注入会话历史
+        # system 白名单：Java 记忆服务把「滚动摘要」装饰成 system 角色混在 history 首条，
+        # 放行后落位为主 system 之后、对话之前（多段 system 为业界惯例）
         messages: list[dict] = list(structured["system"])
+        # 8a) 注入会话状态卡（agent 自主记忆：跨窗口持久的结构化状态，由 server 层加载进 scope）
+        session_state = scope.get("session_state")
+        if isinstance(session_state, dict) and any(session_state.values()):
+            messages.append({"role": "system", "content": build_state_card_prompt(session_state)})
         for h in history:
             role = h.get("role")
             content = h.get("content")
-            if role in ("user", "assistant") and content:
+            if role in ("user", "assistant", "system") and content:
                 messages.append({"role": role, "content": content})
         messages.extend(structured["user"])
 
         # 8) 流式生成 + 红队输出防护（第 3 层）：命中可执行载荷即断流补拒答（CodeShield 角色替代）
+        # memory_filter：流上剥离 agent 自主输出的 <memory_delta> 块（不透传给用户），
+        # 捕获原文写入 scope["_memory_delta"] 供 server 层解析入库（note-taking 决策捕获）
         out_guard = OutputGuard()
+        memory_filter = MemoryDeltaFilter()
         _t0_llm = time.perf_counter()
         try:
             async for token in self.llm.stream(messages):
                 if _ttft["llm_first_ms"] is None:
                     _ttft["llm_first_ms"] = round((time.perf_counter() - _t0_llm) * 1000, 1)
                 if isinstance(token, dict) and token.get("type") == "response":
-                    verdict = out_guard.feed(str(token.get("delta") or ""))
+                    clean = memory_filter.feed(str(token.get("delta") or ""))
+                    if not clean:
+                        continue  # 内容全部落入 memory_delta 捕获区，不透传
+                    verdict = out_guard.feed(clean)
                     if verdict.blocked or verdict.truncated_len:
                         if verdict.blocked:
                             _logger.warning(
@@ -356,11 +369,19 @@ class Agent:
                                 "layer": "output", "rule": verdict.rule_id,
                                 "matched": verdict.matched,
                             }
+                            scope["_memory_delta"] = ""  # 拒答路径不写记忆
                         yield {"type": "response", "delta": out_guard.suffix}
                         return
+                    token = {**token, "delta": clean}
                 yield token
         except Exception as e:  # noqa: BLE001
             yield {"type": "response", "delta": f"\n[生成失败: {e}]"}
+        # 补发尾部缓冲（无 memory_delta 时通常 ≤13 字符的滞留），并带出捕获结果
+        tail = memory_filter.finish()
+        if tail:
+            yield {"type": "response", "delta": tail}
+        if "_memory_delta" not in scope:
+            scope["_memory_delta"] = memory_filter.captured_text
 
     def _is_system_only(self, sub_intents: list[SubQuestionIntent]) -> bool:
         """1:1 翻译 ragent IntentResolver.isSystemOnly。
@@ -403,11 +424,11 @@ class Agent:
         if GUARD_ENABLED:
             system_prompt = system_prompt + HARDENING_RULES
         messages: list[dict] = [{"role": "system", "content": system_prompt}]
-        # 注入会话历史
+        # 注入会话历史（system 白名单放行滚动摘要，同主链路）
         for h in history:
             role = h.get("role")
             content = h.get("content")
-            if role in ("user", "assistant") and content:
+            if role in ("user", "assistant", "system") and content:
                 messages.append({"role": role, "content": content})
         messages.append({"role": "user", "content": question})
 
@@ -471,18 +492,3 @@ class Agent:
         except Exception as e:  # noqa: BLE001
             _logger.debug("生成推荐追问失败，返回空列表: %s", e)
             return []
-
-    async def summarize(self, messages: list[dict], existing_summary: str) -> str:
-        """生成会话记忆摘要（替代 Java 侧本地 LLM 摘要）。失败返回原摘要。"""
-        conv = "\n".join(f"{m.get('role', '')}: {m.get('content', '')}" for m in messages)
-        base = f"已有摘要：{existing_summary}\n" if existing_summary else ""
-        prompt = f"{base}请基于以下对话生成一段简洁的要点摘要（不超过 200 字），用于后续记忆压缩：\n{conv}"
-        try:
-            resp = await self.llm.chat([
-                {"role": "system", "content": "你是会话摘要器，只输出摘要文本。"},
-                {"role": "user", "content": prompt},
-            ], max_tokens=300)
-            return (resp or "").strip()
-        except Exception as e:  # noqa: BLE001
-            _logger.warning("生成会话摘要失败，保留原摘要: %s", e)
-            return existing_summary

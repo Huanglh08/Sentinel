@@ -128,7 +128,6 @@ public class SystemSettingsVO {
         private FeatureSettings features;
         private SearchSettings search;
         private RateLimitSettings rateLimit;
-        private MemorySettings memory;
     }
 
     @Data
@@ -210,16 +209,6 @@ public class SystemSettingsVO {
             private Integer rrfK;
             private Integer rerankCandidateLimit;
         }
-    }
-
-    @Data
-    @Builder
-    public static class MemorySettings {
-        private Integer historyKeepTurns;
-        private Boolean summaryEnabled;
-        private Integer summaryStartTurns;
-        private Integer summaryMaxChars;
-        private Integer titleMaxLength;
     }
 
     @Data

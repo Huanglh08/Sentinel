@@ -19,21 +19,19 @@ package com.nageoffer.ai.sentinel.rag.service.impl;
 
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
-import com.nageoffer.ai.sentinel.rag.config.MemoryProperties;
 import com.nageoffer.ai.sentinel.rag.controller.request.ConversationUpdateRequest;
 import com.nageoffer.ai.sentinel.rag.controller.vo.ConversationVO;
 import com.nageoffer.ai.sentinel.rag.dao.entity.ConversationDO;
 import com.nageoffer.ai.sentinel.rag.dao.entity.ConversationMessageDO;
-import com.nageoffer.ai.sentinel.rag.dao.entity.ConversationSummaryDO;
 import com.nageoffer.ai.sentinel.rag.dao.mapper.ConversationMapper;
 import com.nageoffer.ai.sentinel.rag.dao.mapper.ConversationMessageMapper;
-import com.nageoffer.ai.sentinel.rag.dao.mapper.ConversationSummaryMapper;
 import com.nageoffer.ai.sentinel.framework.context.UserContext;
 import com.nageoffer.ai.sentinel.framework.exception.ClientException;
 import com.nageoffer.ai.sentinel.rag.service.ConversationService;
 import com.nageoffer.ai.sentinel.rag.service.bo.ConversationCreateBO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -51,9 +49,10 @@ public class ConversationServiceImpl implements ConversationService {
 
     private final ConversationMapper conversationMapper;
     private final ConversationMessageMapper messageMapper;
-    private final ConversationSummaryMapper summaryMapper;
-    private final MemoryProperties memoryProperties;
     private final ConversationTitleGenerator titleGenerator;
+
+    @Value("${rag.conversation.title-max-length:30}")
+    private int titleMaxLength;
 
     @Override
     public List<ConversationVO> listByUserId(String userId) {
@@ -123,7 +122,7 @@ public class ConversationServiceImpl implements ConversationService {
         if (StrUtil.isBlank(title)) {
             throw new ClientException("会话名称不能为空");
         }
-        int maxLen = memoryProperties.getTitleMaxLength();
+        int maxLen = titleMaxLength;
         if (title.length() > maxLen) {
             throw new ClientException("会话名称长度不能超过" + maxLen + "个字符");
         }
@@ -166,12 +165,6 @@ public class ConversationServiceImpl implements ConversationService {
                         .eq(ConversationMessageDO::getConversationId, conversationId)
                         .eq(ConversationMessageDO::getUserId, userId)
                         .eq(ConversationMessageDO::getDeleted, 0)
-        );
-        summaryMapper.delete(
-                Wrappers.lambdaQuery(ConversationSummaryDO.class)
-                        .eq(ConversationSummaryDO::getConversationId, conversationId)
-                        .eq(ConversationSummaryDO::getUserId, userId)
-                        .eq(ConversationSummaryDO::getDeleted, 0)
         );
     }
 

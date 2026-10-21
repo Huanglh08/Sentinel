@@ -262,6 +262,89 @@ def run_case(llm: G.SeedLLM, out_dir: Path, append: bool) -> int:
     return len(rows)
 
 
+def _load_done_specs(path: Path) -> set[str]:
+    """从已有种子集读回已完成的规格键（断点续传用）。
+
+    键由 coverage 标签还原，因此与生成计划里的规格键可直接比对——重启后
+    已完成的规格会被跳过，不会重复烧 LLM 调用。
+    """
+    from eval.coverage import spec_from_row, spec_key
+
+    done: set[str] = set()
+    for row in G.load_jsonl(path):
+        spec = spec_from_row(row)
+        if spec:
+            done.add(spec_key(spec))
+    return done
+
+
+def run_case_coverage(
+    llm: G.SeedLLM,
+    out_dir: Path,
+    append: bool,
+    *,
+    per_bin: int = 2,
+    per_spec: int = 1,
+    with_boundary: bool = True,
+    limit: int = 0,
+) -> int:
+    """覆盖率驱动的 case 种子生成（与 run_case 并行存在，产出同一文件）。
+
+    与 run_case（按结论配额随机出题）的区别：这里逐规格指定每个维度的取值，
+    产出带 `coverage` 标签，使 eval.coverage_report 能精确统计覆盖率并做收敛判定。
+    结论分布齐但维度塌，正是 run_case 的短板。
+    """
+    from eval.coverage import (
+        build_boundary_plan,
+        build_coverage_plan,
+        estimate_min_samples,
+    )
+
+    path = out_dir / "case-seeds.jsonl"
+    cross_plan = build_coverage_plan(per_bin=per_bin)
+    boundary_plan = build_boundary_plan() if with_boundary else []
+    lo, detail = estimate_min_samples()
+    print(
+        f"[case_cov] 交叉规格 {len(cross_plan)} 条（理论下界 {lo}），"
+        f"边界规格 {len(boundary_plan)} 条，每规格 {per_spec} 条",
+        flush=True,
+    )
+    for k, v in detail.items():
+        print(f"    {k:34s} need {v}", flush=True)
+
+    plan = cross_plan + boundary_plan
+    if limit > 0:
+        plan = plan[:limit]
+        print(f"[case_cov] --limit 生效，仅生成前 {len(plan)} 条规格", flush=True)
+
+    start_id = _next_start(path, "CASE-", 0) if append else 0
+
+    if append:
+        done_specs = _load_done_specs(path)
+        print(
+            f"[case_cov] 断点续传：已完成 {len(done_specs)} 条规格将被跳过",
+            flush=True,
+        )
+    else:
+        done_specs = set()
+        if path.exists():
+            # 重建模式先清空：否则增量落盘会追加到上一轮的内容后面
+            path.unlink()
+
+    rows = G.gen_case_coverage(
+        llm,
+        plan=plan,
+        per_spec=per_spec,
+        start_id=start_id,
+        existing=_existing_texts(path, append, "clue", "name"),
+        flush_path=path,  # 每 10 条规格增量落盘，中断不丢已完成部分
+        flush_every=10,
+        done_specs=done_specs,
+    )
+    print(f"[case_cov] 完成，本次新增 {len(rows)} 条 -> {path}", flush=True)
+    return len(rows)
+
+
 def run_multturn(llm: G.SeedLLM, out_dir: Path, append: bool) -> int:
     path = out_dir / "multturn-seeds.jsonl"
     docs = load_corpus()
@@ -317,6 +400,7 @@ TASKS = {
     "redteam": run_redteam,
     "intent": run_intent,
     "case": run_case,
+    "case_cov": run_case_coverage,
     "multturn": run_multturn,
     "judge_calib": run_judge_calib,
 }
@@ -341,6 +425,11 @@ def main() -> int:
         default=None,
         help="intent 任务的意图清单 JSON 文件路径；默认从 seed_intent_node.sql 解析",
     )
+    # case_cov（覆盖率驱动生成）专用
+    parser.add_argument("--per-bin", type=int, default=2, help="case_cov：每个交叉 bin 的目标样本数")
+    parser.add_argument("--per-spec", type=int, default=1, help="case_cov：每条规格生成几条变体")
+    parser.add_argument("--no-boundary", action="store_true", help="case_cov：跳过阈值边界专项样本")
+    parser.add_argument("--limit", type=int, default=0, help="case_cov：只生成前 N 条规格（冒烟用）")
     parser.add_argument("--dry-run", action="store_true", help="只打印计划，不调用 LLM")
     args = parser.parse_args()
 
@@ -383,6 +472,16 @@ def main() -> int:
         print(f"\n=== {t} ===", flush=True)
         if t == "intent":
             n = TASKS[t](llm, out_dir, args.append, intents)
+        elif t == "case_cov":
+            n = TASKS[t](
+                llm,
+                out_dir,
+                args.append,
+                per_bin=args.per_bin,
+                per_spec=args.per_spec,
+                with_boundary=not args.no_boundary,
+                limit=args.limit,
+            )
         else:
             n = TASKS[t](llm, out_dir, args.append)
         print(f"--- {t}: 写入 {n} 条", flush=True)
