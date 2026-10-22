@@ -65,6 +65,7 @@ from core.intent.loader import InMemoryIntentLoader, RedisBackedIntentLoader
 from core.intent.service import InMemoryIntentTreeService
 from core.intent import IntentResolver
 from core.retrieval.engine import ChannelConfig, MultiChannelRetrievalEngine, RetrievalConfig
+from core.retrieval.diversity import doc_diversity_backup
 from core.retrieval.external_channels import LightRagBackend, LightRagConfig, YouComWebSearchBackend, WebSearchConfig
 from core.retrieval.rerank import SiliconFlowReranker, LLMReranker, RoutingReranker
 from core.retrieval.rerank_gate import GateResult, get_default_gate
@@ -1569,6 +1570,8 @@ async def debug_retrieval(request: Request, question: str = "", payload: SearchR
     # 诊断口径对齐生产：final 窗口 = budget.context_top_k（生产生成上下文条数），
     # 不得再截小，否则 judge 证据窄于生成上下文会造出伪"未支撑"判定。
     chunks = sorted(seen.values(), key=lambda c: -c.score)[: budget.context_top_k]
+    # 对齐生产链 DocDiversity（order=12）：为缺席文档做保底补位，口径同 core/retrieval/diversity.py
+    chunks = doc_diversity_backup(chunks, list(seen.values()), budget.context_top_k, log_tag="DocDiversityDebug")
     total_ms = (time.perf_counter() - started) * 1000.0
     # metadata jsonb 缺 doc_name 时 pgvector 召回回退 str(doc_id)；此处回表补真实文档名
     # ponytail: 逐条查询 O(n)，诊断端点 n=6 可接受；生产链路应由入库时写全 metadata 解决

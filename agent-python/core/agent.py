@@ -351,7 +351,8 @@ class Agent:
         memory_filter = MemoryDeltaFilter()
         _t0_llm = time.perf_counter()
         try:
-            async for token in self.llm.stream(messages):
+            # 贪婪解码：回答生成与判案链同口径（默认 0.3 的采样方差是 v2b/v2c 答案漂移根源）
+            async for token in self.llm.stream(messages, temperature=0.0):
                 if _ttft["llm_first_ms"] is None:
                     _ttft["llm_first_ms"] = round((time.perf_counter() - _t0_llm) * 1000, 1)
                 if isinstance(token, dict) and token.get("type") == "response":
@@ -435,7 +436,8 @@ class Agent:
         # SYSTEM 直答同样走输出防护（第 3 层）
         out_guard = OutputGuard()
         try:
-            async for token in self.llm.stream(messages):
+            # SYSTEM 直答同样贪婪解码，消除 run 间采样方差（成分1修复）
+            async for token in self.llm.stream(messages, temperature=0.0):
                 if isinstance(token, dict) and token.get("type") == "response":
                     verdict = out_guard.feed(str(token.get("delta") or ""))
                     if verdict.blocked or verdict.truncated_len:

@@ -8,6 +8,7 @@
        - Fusion/RRF（order=5，strategy=rrf 时启用）：score = Σ_channel weight_c / (k + rank_c)，
          按通道原始名次累计；融合后按 candidateLimit 截断候选池
        - Rerank（order=10，rerank_enabled 时启用）：精排输出 contextTopK
+       - DocDiversity（order=12，常开）：文档多样性保底，缺席文档补位（ragas-v2c 成分2修复）
        - MetadataEnrichment（order=20，context_enrich_enabled 时启用）：按 chunkId/docId 回表补 docId/chunkIndex/docName
   3. 归因推导（deriveAttribution）：定向作用域下，存活 chunk 的 collection 命中某意图绑定库即归属该意图
      —— 对应 ragent deriveAttribution + KnowledgeRetrievalResult
@@ -28,6 +29,7 @@ from typing import Any, Callable, Protocol
 
 from core.retrieval.scope_resolver import RetrievalScope
 from core.retrieval.rerank import SiliconFlowReranker
+from core.retrieval.diversity import doc_diversity_backup
 from core.retrieval.types import (
     ChannelType,
     KnowledgeRetrievalResult,
@@ -405,6 +407,35 @@ class RelevanceGatePostProcessor:
 
 
 
+class DocDiversityBackupPostProcessor:
+    """文档多样性保底（order=12，Rerank 之后、RelevanceGate 之前）。
+
+    ragas-v2c 四成分诊断·成分2修复：多意图综合查询的 top_k 窗口按全局
+    相关性排座，强势文档霸占席位、第二篇文档完全缺席（M 域 7 条题 ctx_r=0）。
+    本处理器为缺席文档做保底补位；补位块继续随全队过 RelevanceGate，
+    相关性仍由 gate 统一裁决。详见 diversity.py 模块注释。
+    """
+
+    name = "DocDiversity"
+    order = 12
+
+    def is_enabled(self, context: SearchContext) -> bool:
+        return True
+
+    async def process(
+        self,
+        chunks: list[RetrievedChunk],
+        results: list[SearchChannelResult],
+        context: SearchContext,
+    ) -> list[RetrievedChunk]:
+        if not chunks or not results:
+            return chunks
+        pool: list[RetrievedChunk] = []
+        for r in results:
+            pool.extend(r.chunks)
+        return doc_diversity_backup(chunks, pool, context.budget.context_top_k)
+
+
 class MetadataEnrichmentPostProcessor:
     """1:1 翻译 ragent MetadataEnrichmentPostProcessor（order=20，context_enrich_enabled 时启用）。
 
@@ -609,6 +640,7 @@ class MultiChannelRetrievalEngine:
             DeduplicationPostProcessor(),
             FusionPostProcessor(self.config),
             RerankPostProcessor(self.reranker, self.config),
+            DocDiversityBackupPostProcessor(),
             RelevanceGatePostProcessor(self.relevance_gate, self.config, self.reranker),
             MetadataEnrichmentPostProcessor(self.metadata_resolver, self.config),
         ]

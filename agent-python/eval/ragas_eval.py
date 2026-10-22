@@ -156,22 +156,34 @@ def _build_metrics(llm, embeddings, with_reference: bool) -> dict:
 async def _fetch_contexts(
     client: httpx.AsyncClient, agent_base: str, question: str, timeout: float
 ) -> tuple[list[str], float]:
-    """取 /debug/retrieval 的 final chunk 全文（SSE sources.excerpt 被截断到 100 字，不能用作 RAGAS 上下文）。"""
+    """取 /debug/retrieval 的 final chunk 全文（SSE sources.excerpt 被截断到 100 字，不能用作 RAGAS 上下文）。
+
+    空结果/异常重试一次：v2c 采集出现并发压力下 debug 瞬时失败返回空 contexts，
+    导致 faithfulness 直接报错跳过（成分3修复）。
+    """
     url = f"{agent_base}/debug/retrieval?{urllib.parse.urlencode({'question': question, 'rewrite': 'true'})}"
     t0 = time.perf_counter()
-    try:
-        resp = await client.get(url, timeout=min(timeout, 60.0))
-        resp.raise_for_status()
-        payload = resp.json()
-        texts = [
-            str(c.get("text") or "").strip()
-            for c in (payload.get("final") or [])
-            if str(c.get("text") or "").strip()
-        ]
-        return texts, (time.perf_counter() - t0) * 1000.0
-    except Exception as e:  # noqa: BLE001
-        print(f"[ragas_eval] debug/retrieval 失败: {e}", file=sys.stderr)
-        return [], (time.perf_counter() - t0) * 1000.0
+    last_err: Exception | None = None
+    for attempt in range(2):
+        try:
+            resp = await client.get(url, timeout=min(timeout, 60.0))
+            resp.raise_for_status()
+            payload = resp.json()
+            texts = [
+                str(c.get("text") or "").strip()
+                for c in (payload.get("final") or [])
+                if str(c.get("text") or "").strip()
+            ]
+            if texts or attempt == 1:
+                if not texts:
+                    print(f"[ragas_eval] debug/retrieval 空结果（已重试），按空处理: {question[:40]}", file=sys.stderr)
+                return texts, (time.perf_counter() - t0) * 1000.0
+            print(f"[ragas_eval] debug/retrieval 空结果，重试: {question[:40]}", file=sys.stderr)
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+            if attempt == 1:
+                print(f"[ragas_eval] debug/retrieval 失败（已重试）: {e}", file=sys.stderr)
+    return [], (time.perf_counter() - t0) * 1000.0
 
 
 async def _collect(
