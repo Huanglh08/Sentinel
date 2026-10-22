@@ -47,12 +47,29 @@ for _p in (str(_AGENT_ROOT), str(_REPO_ROOT)):
 
 from eval.e2e_eval import (  # noqa: E402
     E2ESeedCase,
-    _is_refused,
+    REFUSAL_MARKS,
     _login,
     _source_doc_names,
     _stream_chat,
-    load_seeds,
 )
+
+# 拒答判定只在 RAGAS 侧加严：e2e_eval._is_refused 是 e2e/红队/判准校准共用的口径，
+# 这里不碰它，只借用它的特征词表，再补上软拒答说法。
+_EXTRA_REFUSAL_MARKS = ("当前可用信息中没有", "当前可用信息未", "无法列出", "资料中没有")
+_REFUSAL_LEAD_CHARS = 80
+
+
+def _refused(answer: str) -> bool:
+    """按答案开头定性。
+
+    答案中段出现「资料中未提及」通常只是局部覆盖说明，整段仍在作答（表格、清单
+    都给全了），按全文命中会把这类正常答案误判为拒答，所以只看开头一段。
+    """
+    text = (answer or "").strip()
+    if len(text) < 2:
+        return True
+    head = text[:_REFUSAL_LEAD_CHARS]
+    return any(mark in head for mark in REFUSAL_MARKS + _EXTRA_REFUSAL_MARKS)
 
 # 评测模型与被测 agent（通义系）不同家族，沿用现有 judge 选型规则
 # 百炼端点无裸名 deepseek-v4-flash（404 Model not exist），必须带版本后缀
@@ -169,15 +186,19 @@ async def _collect(
 ) -> list[RagasCaseResult]:
     async with httpx.AsyncClient() as client:
         token = await _login(client, gateway, username, password)
-        print("[ragas_eval] 登录成功，开始采集", file=sys.stderr)
+        print(f"[ragas 采集] 0/{len(seeds)} 登录成功，开始逐题取回答与上下文", file=sys.stderr, flush=True)
         sem = asyncio.Semaphore(concurrency)
+        done = 0
 
         async def one(seed: E2ESeedCase) -> RagasCaseResult:
+            nonlocal done
             async with sem:
                 t0 = time.perf_counter()
                 stream = await _stream_chat(client, f"{gateway}/rag/v3/chat", token, seed.q, timeout)
                 chat_ms = (time.perf_counter() - t0) * 1000.0
                 contexts, retrieval_ms = await _fetch_contexts(client, agent, seed.q, timeout)
+            done += 1
+            print(f"[ragas 采集] {done}/{len(seeds)} {seed.q[:40]}", file=sys.stderr, flush=True)
             answer = stream["full_text"]
             return RagasCaseResult(
                 question=seed.q,
@@ -185,7 +206,7 @@ async def _collect(
                 is_attack=seed.expected_refusal,
                 answer=answer,
                 answer_chars=len(answer),
-                refused=_is_refused(answer, stream["sources"]),
+                refused=_refused(answer),
                 doc_names=_source_doc_names(stream["sources"]),
                 contexts=contexts,
                 errors=[stream["error"]] if stream["error"] else [],
@@ -236,7 +257,7 @@ async def _score(
                 else:
                     ref = references.get(case.question, "").strip()
                     if not ref:
-                        case.errors.append("context_recall: 缺少参考答案，跳过")
+                        # 负例本就没有参考答案（知识库查无答案），只统计拒答是否正确，静默跳过
                         return
                     r = await metrics[metric_name].ascore(
                         user_input=case.question,
@@ -251,10 +272,17 @@ async def _score(
     for case in cases:
         for name in metrics:
             tasks.append(apply(name, case))
+    base = len(cases)
+    total = base + len(tasks)
+    print(
+        f"[ragas 打分] {base}/{total} 采集完成，开始打分（{len(tasks)} 次调用，并发 {concurrency}）",
+        file=sys.stderr,
+        flush=True,
+    )
     for i, coro in enumerate(asyncio.as_completed(tasks), 1):
         await coro
-        if i % 10 == 0:
-            print(f"[ragas_eval] 打分进度 {i}/{len(tasks)}", file=sys.stderr)
+        # 采集阶段已经数到 base，打分接着往下数：进度条单调，不因阶段切换回退
+        print(f"[ragas 打分] {base + i}/{total} {i}/{len(tasks)}", file=sys.stderr, flush=True)
 
 
 # ---------- 汇总与输出 ----------
@@ -275,14 +303,20 @@ def _metric_stats(cases: list[RagasCaseResult], metric_names: list[str]) -> dict
 
 
 def _summarize(cases: list[RagasCaseResult], metric_names: list[str]) -> dict:
-    # 拒答样本必须单独分组：RAGAS 的 AnswerRelevancy/Faithfulness 会把「正确拒答」判 0
-    # （拒答话术不回答原问题、断言在资料里也找不到），混在一起会把整体指标系统性压低。
-    normal = [c for c in cases if not c.is_attack and not c.refused]
-    refusal = [c for c in cases if c.is_attack or c.refused]
+    # 分组按题目意图（负例该拒答），不按判定结果：判定是启发式，用来出「负例是否正确
+    # 拒答」这个数，不能拿它决定哪些样本进指标——否则一辆判定错就把正常答案挪出分母。
+    normal = [c for c in cases if not c.is_attack]
+    refusal = [c for c in cases if c.is_attack]
     err_cases = [c for c in cases if c.errors]
     return {
         "total": len(cases),
         "groups": {"normal": len(normal), "refusal": len(refusal)},
+        "refusal_check": {
+            "negatives": len(refusal),
+            "negatives_refused": sum(1 for c in refusal if c.refused),
+            "positives": len(normal),
+            "positives_refused": sum(1 for c in normal if c.refused),
+        },
         "metrics": _metric_stats(cases, metric_names),
         "metrics_normal": _metric_stats(normal, metric_names),
         "metrics_refusal": _metric_stats(refusal, metric_names),
@@ -297,10 +331,13 @@ def _write_reports(payload: dict, output: Path, name: str, ts: str) -> tuple[Pat
     json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     s = payload["summary"]
+    rc = s.get("refusal_check") or {}
     lines = [
         f"# RAGAS 评测 {ts}",
         "",
         f"- 样本数：{s['total']}（正常 {s['groups']['normal']} / 拒答 {s['groups']['refusal']}）",
+        f"- 拒答判定：负例拒答 {rc.get('negatives_refused', 0)}/{rc.get('negatives', 0)}，"
+        f"正常题被拒答 {rc.get('positives_refused', 0)}/{rc.get('positives', 0)}",
         f"- 评测模型：{payload['config']['judge_model']} @ {payload['config']['judge_base_url']}",
         f"- 向量模型：{payload['config']['embed_model']}",
         f"- 参考答案：{'已提供' if payload['config']['with_reference'] else '未提供（跳过 context_recall）'}",
@@ -353,11 +390,40 @@ def _load_references(path: str) -> dict[str, str]:
     return refs
 
 
+def _load_seed_file(path: Path) -> tuple[list[E2ESeedCase], dict[str, str]]:
+    """读 RAGAS 数据集（ragas-seeds.jsonl）：样本 + 每题自带的参考答案。"""
+    if not path.exists():
+        raise FileNotFoundError(f"数据集不存在:{path}")
+    seeds: list[E2ESeedCase] = []
+    refs: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
+        if not line.strip():
+            continue
+        item = json.loads(line)
+        q = str(item.get("q", "")).strip()
+        if not q:
+            continue
+        seeds.append(
+            E2ESeedCase(
+                q=q,
+                expected_refusal=bool(item.get("expected_refusal", False)),
+                expected_doc_ids=[str(x) for x in item.get("expected_doc_ids", [])],
+                category=str(item.get("category", "general")),
+            )
+        )
+        ref = str(item.get("reference") or "").strip()
+        if ref:
+            refs[q] = ref
+    if not seeds:
+        raise ValueError(f"数据集为空:{path}")
+    return seeds, refs
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="RAGAS 四指标独立评测")
     parser.add_argument("--gateway", default="http://localhost:9090/api/sentinel")
     parser.add_argument("--agent", default="http://localhost:8001")
-    parser.add_argument("--seed", default=str(_REPO_ROOT / "evaluation" / "seeds" / "e2e-seeds.jsonl"))
+    parser.add_argument("--seed", default=str(_REPO_ROOT / "evaluation" / "seeds" / "ragas-seeds.jsonl"))
     parser.add_argument("--output", default=str(_REPO_ROOT / "evaluation" / "reports"))
     parser.add_argument("--username", default="admin")
     parser.add_argument("--password", default="admin")
@@ -365,11 +431,15 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=180.0)
     parser.add_argument("--limit", type=int, default=0, help="仅取前 N 条，0=全部")
     parser.add_argument("--category", default="", help="按 seed category 子串过滤（逗号分隔）")
-    parser.add_argument("--reference", default="", help="参考答案 jsonl（每行 {q, reference}），提供才跑 context_recall")
+    parser.add_argument(
+        "--reference",
+        default="",
+        help="额外参考答案 jsonl（每行 {q, reference}），用于覆盖或补充数据集自带的 reference",
+    )
     parser.add_argument("--name", default="ragas", help="报告名前缀")
     args = parser.parse_args()
 
-    seeds = load_seeds(Path(args.seed))
+    seeds, references = _load_seed_file(Path(args.seed))
     if args.category:
         wanted = [x.strip() for x in args.category.split(",") if x.strip()]
         seeds = [s for s in seeds if any(w in s.category for w in wanted)]
@@ -379,8 +449,8 @@ def main() -> int:
         print("[ragas_eval] 过滤后无样本", file=sys.stderr)
         return 2
 
-    references = _load_references(args.reference)
-    with_ref = bool(references)
+    references.update(_load_references(args.reference))
+    with_ref = any(s.q in references for s in seeds)
 
     llm = _build_llm()
     embeddings = _build_embeddings()
@@ -421,8 +491,8 @@ def main() -> int:
     json_path, md_path = _write_reports(payload, Path(args.output), args.name, ts)
 
     print(json.dumps(payload["summary"]["metrics"], ensure_ascii=False, indent=2))
-    print(f"[ragas_eval] 报告: {json_path}")
-    print(f"[ragas_eval] 报告: {md_path}")
+    print(f"[ragas_eval] JSON: {json_path}")
+    print(f"[ragas_eval] Markdown: {md_path}")  # task.sh 用这行回填报告路径
     return 0
 
 
