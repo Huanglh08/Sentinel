@@ -17,21 +17,37 @@ v2 增强（multiturn 治理，2026-09-01）：
   - 澄清判定仅在历史注入后仍无法补全时触发，完备问题必须 clarify=false
 """
 from __future__ import annotations
+import hashlib
 import logging
+import os
+import time
 
 import json
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from core.llm import LLMClient, LLMError
 
 _logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# 改写确定性（实验法 S0 / 修复1：temperature 0 + seed + 按问题哈希缓存）
+#   - 消灭轮间采样漂移（业界 seed-locking 最佳实践）
+#   - 缓存键含 system prompt + 消息 + 采样参数 + 模型名：任一变化自动失效
+#   - 仅缓存 LLM 有效 JSON 结果；规则拆分降级路径不缓存（避免污染）
+# ---------------------------------------------------------------------------
+REWRITE_TEMPERATURE = float(os.getenv("REWRITE_TEMPERATURE", "0.0"))
+REWRITE_TOP_P = float(os.getenv("REWRITE_TOP_P", "1.0"))
+REWRITE_SEED = int(os.getenv("REWRITE_SEED", "42"))
+REWRITE_CACHE_ENABLED = os.getenv("REWRITE_CACHE_ENABLED", "true").strip().lower() in ("1", "true", "yes")
+REWRITE_CACHE_DIR = Path(os.getenv("REWRITE_CACHE_DIR", os.path.join(".sentinel", "rewrite_cache")))
+
 PROMPT = """你是一个查询理解与重构助手。请结合对话历史（如有），将用户的输入转换为更利于向量检索的检索查询，并拆分为多个子问题。
 
 要求：
 1. 第 1 个查询是对用户问题的完整、准确的语义重构：结合对话历史补全指代词（它/该/这个/上述等）与省略成分，明确实体，改写为不依赖上下文即可理解的自包含问题。无历史或问题本身自包含时，保持原语义仅做检索友好化。检索友好化的做法：去除口语寒暄与无信息量泛词（如"有用户投诉""来咨询""想问一下""问题排查"），但必须保留完整语义与领域术语，输出为精炼的完整语义句，不要碎片化堆砌关键词（反例："用户注册 正确手机号格式 问题排查"是错误示范）。本身就是明确的术语/技术查询（如"TensorFlow LSTM dropout 默认值"）保持原样不要改写。跨语言召回：知识库含英文安全手册（清单见末尾），当场景描述对应清单中某个英文文档的主题（如输入校验→input validation、会话管理/踢下线/会话超时→session management session timeout、密码存储→password storage、数据/模型投毒→data poisoning）时，在第 1 个查询末尾以空格追加该英文主题词；对应中文文档（如交易风控、登录防御）则追加中文主题词，始终追加、不得省略。
-2. 第 2~N 个查询是拆解出的独立子问题。拆解判定：问题需要来自不同文档或不同知识域的多方面信息组合才能完整回答（如"某流程怎么走 + 什么情况会被拦"），或含多个并列疑问点时，必须拆成各自可独立检索、自成完整语义的子问题；单一知识点的简单问题不要拆。多主题场景（如"密码含emoji导致校验失败且被自动登出"同时涉及密码校验与登录会话）必须按主题分别输出多条查询，每条末尾附带自己对应的主题词，不要合并成一条。语言变体：中文问题中含英文专有术语（括号标注或中英混写，如"完美注入抵抗（perfect injection resistance）"）时，追加 1 个以该英文术语为核心的英文检索子查询（如"perfect injection resistance variable escaping"），用于命中英文知识库文档；纯中文且无英文术语的问题不要生成英文子查询。
+2. 第 2~N 个查询是拆解出的独立子问题。拆解判定：问题需要来自不同文档或不同知识域的多方面信息组合才能完整回答（如"某流程怎么走 + 什么情况会被拦"），或含多个并列疑问点时，必须拆成各自可独立检索、自成完整语义的子问题；单一知识点的简单问题不要拆。跨文档对比/配合类问题必须拆分——问题点名两篇文档（或两个主题/机制）并要求它们各自的内容、区别或配合方式（如"A指南与B指南分别要求什么""A和B在X上如何配合""A负责什么、B负责什么"），此时每条子查询只装一个文档/主题及其在该问题中的具体焦点，禁止把两个主题合并在一条查询里。主题保真：题面点名的文档名/机制名（如"凭证填充防御""多因素认证"）必须在对应子查询中原样保留，禁止泛化改写或偷换成其他文档主题——错误做法：把"凭证填充防御与会话管理在登录成功后如何配合"拆成"认证指南对登录成功之后的处理要求 + 会话管理…"（凭证填充被偷换成认证）；正确做法：拆成"凭证填充防御在登录成功后的处理要求 credential stuffing + 会话管理指南对登录成功后创建会话的要求 session management"。输出前必须逐项自检：对照题面点名的每个主题词，逐一确认它出现在至少一条子查询中；发现某个主题词在任何子查询里都没出现，立即补一条以该主题词原词为核心的子查询（可附带对应的英文主题词尾巴），这一步不可省略。多主题场景（如"密码含emoji导致校验失败且被自动登出"同时涉及密码校验与登录会话）必须按主题分别输出多条查询，每条末尾附带自己对应的主题词，不要合并成一条。语言变体：中文问题中含英文专有术语（括号标注或中英混写，如"完美注入抵抗（perfect injection resistance）"）时，追加 1 个以该英文术语为核心的英文检索子查询（如"perfect injection resistance variable escaping"），用于命中英文知识库文档；纯中文且无英文术语的问题不要生成英文子查询。
 3. 澄清判定：仅当用户在描述自身或具体的个案情况（如某笔订单/交易被拦截、某账号登录异常、某接口流量突增），且缺少定位或处置所必需的标识要素（订单号/流水号、设备或环境标识、完整的时间与金额组合、支付通道、触发的提示信息等），对话历史也无法补全时，设置 clarify=true，并在 clarify_question 中礼貌追问当前最关键的缺失要素（一次只追问一个，不要罗列多个方向）。知识概念类问题（如何防御X/什么是Y/手册对Z怎么规定）必须 clarify=false，即答不出也只是检索问题，不是要素缺失。
 4. 只输出 JSON 对象，不要解释。示例：
 {"queries": [{"query": "公司年假请假流程与天数规定", "reconstruct": true}], "clarify": false, "clarify_question": ""}
@@ -39,6 +55,9 @@ PROMPT = """你是一个查询理解与重构助手。请结合对话历史（�
 {"queries": [{"query": "凌晨连续多笔4999元拆分转账且设备与收货地址变更的交易欺诈排查", "reconstruct": true}], "clarify": false, "clarify_question": ""}
 {"queries": [{"query": "用户注册时手机号格式校验误判正常号码的问题排查 input validation", "reconstruct": true}], "clarify": false, "clarify_question": ""}
 {"queries": [{"query": "登录后采集人脸信息并存储原始照片的合规性要求", "reconstruct": true}], "clarify": false, "clarify_question": ""}
+{"queries": [{"query": "会话管理与多因素认证在敏感操作二次验证中的配合"}, {"query": "会话管理指南对敏感操作重新验证身份的要求 session management"}, {"query": "多因素认证在敏感操作时的再次认证要求 multifactor authentication"}], "clarify": false, "clarify_question": ""}
+{"queries": [{"query": "认证指南对登录成功之后的处理要求 authentication"}, {"query": "会话管理指南对登录成功后创建会话的要求 session management"}], "clarify": false, "clarify_question": ""}
+{"queries": [{"query": "凭证填充防御在登录成功后的处理要求 credential stuffing"}, {"query": "会话管理指南对登录成功后创建会话的要求 session management"}], "clarify": false, "clarify_question": ""}
 {"queries": [], "clarify": true, "clarify_question": "请提供您的订单号或大致下单时间，以便我查询该订单的拦截原因。"}
 {"queries": [], "clarify": true, "clarify_question": "请问该接口的流量突增持续了多长时间？是否伴随异常来源IP？"}"""
 
@@ -55,6 +74,8 @@ class RewriteResult:
     queries: list[str] = field(default_factory=list)
     clarify: bool = False
     clarify_question: str = ""
+    # 诊断用：True = 命中改写缓存（本轮未发生 LLM 调用）
+    cache_hit: bool = False
 
 
 class QueryRewriter:
@@ -78,18 +99,32 @@ class QueryRewriter:
         self, question: str, history: list[dict] | None = None
     ) -> RewriteResult:
         """返回 RewriteResult；失败时降级为 [原问题] 且不澄清（绝不能让链路崩）。"""
+        cache_key = self._cache_key(question, history)
+        if cache_key:
+            hit = self._cache_get(cache_key)
+            if hit is not None:
+                _logger.info("[RewriteCache] 命中缓存 key=%s（跳过 LLM 调用）", cache_key[:12])
+                return hit
         try:
             raw = await self.llm.chat(
                 self._messages(question, history),
-                temperature=0.1, top_p=0.6,
+                temperature=REWRITE_TEMPERATURE,
+                top_p=REWRITE_TOP_P,
+                extra_body={"seed": REWRITE_SEED} if REWRITE_SEED else None,
             )
-            return self._parse(raw, question)
+            result = self._parse(raw, question)
+            # 仅缓存 LLM 有效 JSON 的结果；规则拆分回退不缓存（模型恢复后仍能拿到好结果）
+            if cache_key and self._is_llm_json(raw):
+                self._cache_put(cache_key, result)
+            elif cache_key:
+                _logger.warning("改写输出非纯 JSON，不进缓存 (raw[:120]=%r)", raw[:120])
+            return result
         except LLMError as e:
             _logger.warning("查询改写 LLM 调用失败，回退原问题: %s", e)
             return RewriteResult(queries=[question])
         except Exception as e:  # noqa: BLE001
             # JSON 解析等异常也降级
-            _logger.debug("查询改写结果处理失败，回退原问题: %s", e)
+            _logger.warning("查询改写结果处理失败，回退原问题: %r (raw[:120]=%r)", e, raw[:120])
             return RewriteResult(queries=[question])
 
     def _messages(self, question: str, history: list[dict] | None) -> list[dict]:
@@ -102,6 +137,72 @@ class QueryRewriter:
                 msgs.append({"role": role, "content": content})
         msgs.append({"role": "user", "content": question})
         return msgs
+
+    # ------------------------------------------------------------------
+    # 改写缓存（按问题哈希；键含 messages 全量 + 采样参数 + 模型名）
+    # ------------------------------------------------------------------
+
+    def _cache_key(self, question: str, history: list[dict] | None) -> str:
+        if not REWRITE_CACHE_ENABLED:
+            return ""
+        payload = json.dumps(
+            {
+                "model": getattr(self.llm, "model", ""),
+                "messages": self._messages(question, history),
+                "temperature": REWRITE_TEMPERATURE,
+                "top_p": REWRITE_TOP_P,
+                "seed": REWRITE_SEED,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def _cache_get(self, key: str) -> RewriteResult | None:
+        try:
+            data = json.loads((REWRITE_CACHE_DIR / f"{key}.json").read_text(encoding="utf-8"))
+            r = data["result"]
+            return RewriteResult(
+                queries=[str(q) for q in r["queries"]],
+                clarify=bool(r.get("clarify", False)),
+                clarify_question=str(r.get("clarify_question", "")),
+                cache_hit=True,
+            )
+        except Exception:  # noqa: BLE001  未命中/损坏一律视为未命中
+            return None
+
+    def _cache_put(self, key: str, result: RewriteResult) -> None:
+        try:
+            REWRITE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            path = REWRITE_CACHE_DIR / f"{key}.json"
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(
+                json.dumps(
+                    {
+                        "result": {
+                            "queries": result.queries,
+                            "clarify": result.clarify,
+                            "clarify_question": result.clarify_question,
+                        },
+                        "created_at": time.time(),
+                    },
+                    ensure_ascii=False,
+                    indent=1,
+                ),
+                encoding="utf-8",
+            )
+            tmp.replace(path)  # 原子替换，避免并发写坏缓存
+        except Exception as e:  # noqa: BLE001  写失败不影响主链路
+            _logger.warning("改写缓存写入失败（忽略）: %r", e)
+
+    @staticmethod
+    def _is_llm_json(raw: str) -> bool:
+        """区分 LLM 有效输出与规则拆分降级：只有前者允许进缓存。"""
+        try:
+            json.loads(raw.strip().strip("`").replace("```json", "").replace("```", "").strip())
+            return True
+        except Exception:  # noqa: BLE001
+            return False
 
     def _parse(self, raw: str, fallback: str) -> RewriteResult:
         try:

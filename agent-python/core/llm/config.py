@@ -136,8 +136,11 @@ class AIModelProperties:
                     model=m,
                     supports_thinking=False,
                     # 百炼 qwen3 系默认输出思考内容，会耗尽输出限额导致正文为空；
-                    # 实测对 qwen-plus/flash 等非思考模型无害（参数被忽略）
-                    extra_body={"enable_thinking": False},
+                    # 实测对 qwen-plus/flash 等非思考模型无害（参数被忽略）。
+                    # seed 固定随机种子：百炼官方口径“尽力确定性采样，尽可能返回
+                    # 相同结果”，非完全一致承诺（2026-10-22 文档调研）；随 80 题
+                    # 评测轮间对比顺便验证其收敛效果，无效即撤
+                    extra_body={"enable_thinking": False, "seed": 20261022},
                 )
                 for i, m in enumerate(override_models)
             ]

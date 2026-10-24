@@ -29,7 +29,7 @@ from typing import Any, Callable, Protocol
 
 from core.retrieval.scope_resolver import RetrievalScope
 from core.retrieval.rerank import SiliconFlowReranker
-from core.retrieval.diversity import doc_diversity_backup
+from core.retrieval.diversity import doc_diversity_backup, doc_diversity_backup_v2
 from core.retrieval.types import (
     ChannelType,
     KnowledgeRetrievalResult,
@@ -97,6 +97,17 @@ class RetrievalConfig:
     # 按 grounding 规则验证，消除切空对正样本的误伤（离线校准 12.1%）；False 回退旧行为
     gate_soft_landing: bool = True
     gate_soft_landing_top_k: int = 5
+    # 头部块沉底（ragas-v3 precision 优化）：overview 块让位细节块
+    # （ragas-v4 归因：与 DocDiversity 交互放大候选池漂移，v4 后默认下线，
+    #  env RAG_HEAD_DEMOTE 控制做消融复核）
+    head_demote_enabled: bool = False
+    # 文档多样性补位（order=12）消融开关与参数（ragas-v4 归因后实验法 S1）
+    # 默认保持 v3 行为：enabled=True / max_per_doc=0 不限制 / min_score=0.0 无门槛
+    diversity_enabled: bool = True
+    # 每文档席位上限（>0 时启用 v2 逐出逻辑：逐“超额文档中分数最低一席”，与排位解耦）
+    diversity_max_per_doc: int = 0
+    # 补位块重排分门槛（>0 时对缺席文档候选块补跑 rerank，低于门槛不补位，宁缺勿滥）
+    diversity_min_score: float = 0.0
 
     @classmethod
     def default(cls) -> "RetrievalConfig":
@@ -407,6 +418,58 @@ class RelevanceGatePostProcessor:
 
 
 
+class HeadChunkDemotionPostProcessor:
+    """头部块沉底（order=11，Rerank 之后、DocDiversity 之前）。
+
+    ragas-v3 诊断：文档 overview 块（"# 标题 - 业务码：… - 版本：…" 或
+    "# Title ## Introduction …"）不含答案内容，却因含文档主题词获得不低的
+    排位，占据窗口前排——对 context_precision 是前排 0 分块（RAGAS 逐块判
+    "对回答有用吗"必判 0），且 DocDiversity 逐出多席文档时按窗口序取最后一席，
+    头部块占前排会错位挤掉细节块。
+
+    策略（保守，窗口文档集合零变化）：
+    - 仅识别 chunk_index=0 且以一级标题开头的块；
+    - 仅当同文档在窗口内还有其他块时，将其移到窗口末尾（让位细节块）；
+      若它是该文档唯一块，保持原位（短文档首块可能即正文，不能动）；
+    - 不踢出、不重排其他块；沉底的头部块随后成为 DocDiversity 的优先
+      逐出对象（为缺席文档补位让席），软着陆截断时也最先出局。
+    """
+
+    name = "HeadDemote"
+    order = 11
+
+    def is_enabled(self, context: SearchContext) -> bool:
+        return self.config.head_demote_enabled
+
+    def __init__(self, config: RetrievalConfig) -> None:
+        self.config = config
+
+    async def process(
+        self,
+        chunks: list[RetrievedChunk],
+        results: list[SearchChannelResult],
+        context: SearchContext,
+    ) -> list[RetrievedChunk]:
+        if len(chunks) < 2:
+            return chunks
+        heads = [
+            i
+            for i, c in enumerate(chunks)
+            if c.chunk_index == 0 and c.doc_id is not None and str(c.text).lstrip().startswith("# ")
+        ]
+        if not heads:
+            return chunks
+        doc_counts: dict[str, int] = {}
+        for c in chunks:
+            if c.doc_id is not None:
+                doc_counts[c.doc_id] = doc_counts.get(c.doc_id, 0) + 1
+        demote_ids = {chunks[i].id for i in heads if doc_counts.get(chunks[i].doc_id, 0) > 1}
+        if not demote_ids:
+            return chunks
+        _logger.info("[HeadDemote] 头部块沉底 %d 条（同文档有细节块让位）", len(demote_ids))
+        return [c for c in chunks if c.id not in demote_ids] + [c for c in chunks if c.id in demote_ids]
+
+
 class DocDiversityBackupPostProcessor:
     """文档多样性保底（order=12，Rerank 之后、RelevanceGate 之前）。
 
@@ -419,7 +482,17 @@ class DocDiversityBackupPostProcessor:
     name = "DocDiversity"
     order = 12
 
+    def __init__(
+        self,
+        config: RetrievalConfig | None = None,
+        reranker: Any | None = None,
+    ) -> None:
+        self.config = config
+        self.reranker = reranker
+
     def is_enabled(self, context: SearchContext) -> bool:
+        if self.config is not None:
+            return self.config.diversity_enabled
         return True
 
     async def process(
@@ -433,6 +506,19 @@ class DocDiversityBackupPostProcessor:
         pool: list[RetrievedChunk] = []
         for r in results:
             pool.extend(r.chunks)
+        max_per_doc = self.config.diversity_max_per_doc if self.config else 0
+        min_score = self.config.diversity_min_score if self.config else 0.0
+        if max_per_doc > 0 or min_score > 0:
+            # v2：逐出与排位解耦 + 补位重排分门槛（实验法 S1 消融变量）
+            return await doc_diversity_backup_v2(
+                chunks,
+                pool,
+                context.budget.context_top_k,
+                reranker=self.reranker,
+                query=context.main_question,
+                max_per_doc=max_per_doc,
+                min_score=min_score,
+            )
         return doc_diversity_backup(chunks, pool, context.budget.context_top_k)
 
 
@@ -640,7 +726,8 @@ class MultiChannelRetrievalEngine:
             DeduplicationPostProcessor(),
             FusionPostProcessor(self.config),
             RerankPostProcessor(self.reranker, self.config),
-            DocDiversityBackupPostProcessor(),
+            HeadChunkDemotionPostProcessor(self.config),
+            DocDiversityBackupPostProcessor(self.config, self.reranker),
             RelevanceGatePostProcessor(self.relevance_gate, self.config, self.reranker),
             MetadataEnrichmentPostProcessor(self.metadata_resolver, self.config),
         ]

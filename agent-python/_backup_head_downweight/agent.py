@@ -1,0 +1,496 @@
+"""Agent 编排主链路：1:1 翻译 ragent rag.core 编排。
+
+链路（严格对应 ragent RAGPipelineService / RetrievalService）：
+  rewrite(问题改写+拆子问题)        ← core.rewrite.QueryRewriter
+    → IntentResolver.resolve       ← core.intent.IntentResolver（并发 + capTotalIntents）
+    → IntentGuidanceService        ← core.intent.guidance（歧义引导）
+    → handleSystemOnly             ← 纯系统响应（SYSTEM意图直接响应）
+    → MCP 工具调用                 ← core.mcp_client.MCPToolClient
+    → RetrievalScopeResolver       ← core.retrieval.scope_resolver
+    → MultiChannelRetrievalEngine  ← core.retrieval.engine
+    → SourcesAssembler             ← core.source.SourcesAssembler
+    → CitationContextEnricher      ← core.source.CitationContextEnricher
+    → RAGPromptService             ← core.prompt.RAGPromptService
+    → LLM.stream
+
+保留原版关键语义：
+  - 全链路降级：LLM 失败/解析失败不崩，回退到无意图/原问题/纯生成
+  - 单轮会话即可（记忆存储留在 Java 侧 JdbcConversationMemoryStore）
+  - 歧义引导：多意图得分接近时主动引导用户澄清
+  - 纯系统响应：SYSTEM意图直接使用系统Prompt响应，不检索
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import threading
+import time
+from dataclasses import asdict
+from typing import AsyncIterator
+
+from core.config import RAGConfigProperties, SearchChannelProperties
+from core.db import hidden_collections as _hidden_collections
+from core.llm import LLMClient
+from core.intent import IntentResolver, NodeScore, SubQuestionIntent, IntentGuidanceService, IntentKind
+from core.rewrite import QueryRewriter
+from core.mcp_client import MCPToolClient
+from core.prompt import (
+    ContextFormatter,
+    PromptContext,
+    PromptPlan,
+    RAGPromptService,
+)
+from core.retrieval.engine import MultiChannelRetrievalEngine
+from core.retrieval.scope_resolver import RetrievalScope, RetrievalScopeResolver
+from core.retrieval.types import RetrievedChunk, RetrievalBudget
+from core.source import CitationContextEnricher, SourceRef, SourcesAssembler
+from core.guard import InputGuard, OutputGuard, TrajectoryAuditor, TRAJECTORY_CONSTRAINTS
+from core.guard.hardening import HARDENING_RULES
+from core.guard.rules import GUARD_ENABLED
+from core.session_memory import MemoryDeltaFilter, build_state_card_prompt
+
+
+_logger = logging.getLogger(__name__)
+
+
+class Agent:
+    def __init__(
+        self,
+        llm: LLMClient,
+        intent_resolver: IntentResolver | None = None,
+        rewriter: QueryRewriter | None = None,
+        mcp: MCPToolClient | None = None,
+        retriever: MultiChannelRetrievalEngine | None = None,
+        prompt_service: RAGPromptService | None = None,
+        scope_resolver: RetrievalScopeResolver | None = None,
+        sources_assembler: SourcesAssembler | None = None,
+        citation_enricher: CitationContextEnricher | None = None,
+        doc_meta_provider: Any | None = None,
+        active_collections: list[str] | None = None,
+        rag_config: RAGConfigProperties | None = None,
+        search_channel_config: SearchChannelProperties | None = None,
+        guidance_service: IntentGuidanceService | None = None,
+    ):
+        self.llm = llm
+        self.rag_config = rag_config or RAGConfigProperties.from_env()
+        self.search_channel_config = search_channel_config or SearchChannelProperties.from_env()
+        self.resolver = intent_resolver or IntentResolver(llm)
+        self.rewriter = rewriter or QueryRewriter(llm)
+        self.mcp = mcp or MCPToolClient()
+        self.retriever = retriever
+        self.doc_meta_provider = doc_meta_provider
+        self._active_collections = list(active_collections if active_collections is not None else self.rag_config.active_collections)
+        # 1:1 翻译 ragent RAGPromptService / RetrievalScopeResolver / SourcesAssembler / CitationContextEnricher
+        self.prompt_service = prompt_service or RAGPromptService(
+            citation_enabled=self.rag_config.citation_enabled,
+        )
+        self.scope_resolver = scope_resolver or RetrievalScopeResolver(
+            active_collections=self._active_collections,
+        )
+        self.sources_assembler = sources_assembler or SourcesAssembler()
+        self.citation_enricher = citation_enricher or CitationContextEnricher(
+            citation_enabled=self.rag_config.citation_enabled,
+        )
+        # 1:1 翻译 ragent IntentGuidanceService（歧义引导）
+        self.guidance_service = guidance_service or IntentGuidanceService()
+        # 红队防护第 1 层：输入确定性规则分类（LlamaFirewall PromptGuard 角色替代）
+        self.input_guard = InputGuard()
+        # 红队防护第 2 层：轨迹审计（rewrite 轨迹弱信号扫描 → 动态守则注入，
+        # LlamaFirewall AlignmentCheck 角色的成本最优替代）
+        self.trajectory_auditor = TrajectoryAuditor()
+
+    async def answer(self, question: str, scope: dict | None = None) -> AsyncIterator[dict]:
+        """流式回答：yield dict（type+delta）。检索后自动注入引用编号与来源面板数据。
+
+        yield 结构：{"type": "response", "delta": str} 或 {"type": "think", "delta": str}
+
+        取消协议：1:1 翻译 ragent StreamCancellationHandle
+          - 接受 scope["_cancelled"] = threading.Event
+          - 编排主链路每步检查；流式生成阶段由 server.py 直接 raise asyncio.CancelledError 终止
+        """
+        if scope is None:
+            # 不能写 scope = scope or {}：空 dict 是 falsy，会新建对象，
+            # 调用方（server.py complete 帧）持有的引用从此拿不到 _ttft_breakdown/_sources
+            scope = {}
+        knowledge_base_ids: list[str] = list(scope.get("knowledgeBaseIds") or [])
+        history: list[dict] = list(scope.get("history") or [])
+        cancelled: threading.Event | None = scope.get("_cancelled")
+        # TTFT 五段归因（Langfuse span 模型的轻量自建版，不引 SDK）：提前塞引用，
+        # 各段完成即填；中途短路（拒答/澄清/引导）路径带部分 breakdown 返回
+        user_role = str(scope.get("user_role") or "").strip().lower()
+        hidden = set() if user_role == "admin" else set(_hidden_collections())
+        # P1 知识库可见性：非 admin 用户按 hidden 集合过滤检索范围（见第 4 步）
+
+        _ttft: dict = {"rewrite_ms": None, "intent_ms": None, "retrieve_ms": None,
+                       "rerank_ms": None, "gate_ms": None, "llm_first_ms": None}
+        scope["_ttft_breakdown"] = _ttft
+
+        def _check_cancel() -> None:
+            if cancelled is not None and cancelled.is_set():
+                raise asyncio.CancelledError()
+
+        # 0) 红队输入防护（第 1 层）：高危模式命中即短路拒答，零检索零生成（<1ms）
+        #    拦截时 sources 为空 + 话术含拒答特征词 → redteam_eval 双重确定性判拦截
+        guard_verdict = self.input_guard.inspect(question)
+        if guard_verdict.blocked:
+            _logger.warning(
+                "[guard] input blocked rule=%s matched=%r q=%.120s",
+                guard_verdict.rule_id, guard_verdict.matched, question,
+            )
+            scope["_sources"] = []
+            scope["_guard"] = {
+                "layer": "input", "rule": guard_verdict.rule_id,
+                "matched": guard_verdict.matched,
+            }
+            yield {"type": "response", "delta": guard_verdict.refusal_text}
+            return
+
+        # 1) 改写 + 拆子问题（1:1 翻译 ragent QueryRewriteService）
+        # v2(2026-09-01 multiturn 治理): 注入历史做指代消解改写；缺要素问题短路澄清
+        #    （澄清判定搭改写顺风车，零额外 LLM 调用）
+        _check_cancel()
+        _t0_rewrite = time.perf_counter()
+        rewrite_result = await self.rewriter.rewrite(question, history)
+        _ttft["rewrite_ms"] = round((time.perf_counter() - _t0_rewrite) * 1000, 1)
+        if rewrite_result.clarify and rewrite_result.clarify_question:
+            _logger.info(
+                "[clarify] 要素缺失追问: %.80s | q=%.120s", rewrite_result.clarify_question, question
+            )
+            scope["_sources"] = []
+            yield {"type": "response", "delta": rewrite_result.clarify_question}
+            return
+        sub_queries = rewrite_result.queries or [question]
+        # 原句保留为第一路查询：LLM 改写有方差（可能丢实体/换句式导致向量漂移），
+        # 原句与改写句双路检索后融合互补（root cause: 单路改写在 LLM04 类场景反噬召回）
+        if question not in sub_queries:
+            sub_queries = [question, *sub_queries]
+
+        # 2) 意图解析：并发 + cap_total_intents（1:1 翻译 ragent IntentResolver.resolve）
+        _check_cancel()
+        _t0_intent = time.perf_counter()
+        sub_intents: list[SubQuestionIntent] = await self.resolver.resolve(sub_queries)
+        _ttft["intent_ms"] = round((time.perf_counter() - _t0_intent) * 1000, 1)
+        mcp_intents, kb_intents = self.resolver.merge_intent_group(sub_intents)
+
+        # 2.1) 歧义引导（1:1 翻译 ragent IntentGuidanceService.detectAmbiguity）
+        # 当用户问题存在歧义时，直接输出引导提示并返回
+        _check_cancel()
+        rewritten_question = sub_queries[0] if sub_queries else question
+        guidance_decision = self.guidance_service.detect_ambiguity(rewritten_question, sub_intents)
+        if guidance_decision.is_prompt and guidance_decision.prompt:
+            yield {"type": "response", "delta": guidance_decision.prompt}
+            return
+
+        # 2.2) 纯系统响应（1:1 翻译 ragent handleSystemOnly）
+        # 当意图全部为SYSTEM类型时，直接使用系统Prompt响应，不进行检索
+        _check_cancel()
+        if self._is_system_only(sub_intents):
+            custom_prompt = self._extract_system_prompt(sub_intents)
+            async for token in self._stream_system_response(
+                rewritten_question, history, custom_prompt
+            ):
+                yield token
+            return
+
+        # 3) MCP 工具调用（1:1 翻译 ragent McpService.call）
+        mcp_records: list[dict] = []
+        for si in sub_intents:
+            _check_cancel()
+            for s in si.node_scores:
+                if s.node and s.node.kind.value == "MCP" and s.node.tool_id:
+                    is_error, text = await self.mcp.call(s.node.tool_id, {"query": si.question})
+                    mcp_records.append({
+                        "question": si.question,
+                        "tool_id": s.node.tool_id,
+                        "result": text,
+                        "is_error": is_error,
+                    })
+
+        # 4) KB 检索作用域：1:1 翻译 ragent RetrievalScopeResolver.resolve
+        #    顶层一次解析（跨子查询取 topScore），同时 per_sub_query 拿到每个 sq 的 scope
+        sub_query_to_scores = [(si.question, list(si.node_scores)) for si in sub_intents]
+        scope_resolver = self.scope_resolver
+        if hidden:
+            # 并发安全：不就地改共享实例，非 admin 用户每次请求新建过滤后的 resolver
+            scope_resolver = RetrievalScopeResolver(
+                active_collections=[
+                    c for c in self._active_collections if c not in hidden
+                ],
+                confidence_threshold=self.scope_resolver.confidence_threshold,
+                min_intent_score=self.scope_resolver.min_intent_score,
+            )
+        kb_top_scope: RetrievalScope = scope_resolver.resolve(sub_query_to_scores)
+        per_sq_scopes: list[tuple[str, RetrievalScope]] = scope_resolver.per_sub_query(
+            sub_query_to_scores
+        )
+
+        # 用户显式 knowledge_base_ids 时，强制覆盖 scope.collections
+        # 1:1 翻译 ragent user_explicit_knowledge_base_ids 分支
+        if knowledge_base_ids:
+            explicit = [c for c in knowledge_base_ids if c and c not in hidden]
+            if explicit:
+                shared = RetrievalScope(
+                    mode="INTENT",
+                    collections=explicit,
+                    supplement_collections=kb_top_scope.supplement_collections,
+                    top_score=kb_top_scope.top_score,
+                    node_ids=kb_top_scope.node_ids,
+                )
+                per_sq_scopes = [(sq, shared) for sq, _ in per_sq_scopes]
+
+        # 5) KB 检索：按子查询的 scope 分批（修跨库混淆）
+        kb_hits: list[RetrievedChunk] = []
+        if self.retriever:
+            _engine_timing: dict = {}
+            _t0_retrieve = time.perf_counter()
+            for sq, scope_resolved in per_sq_scopes:
+                _check_cancel()
+                # 1:1 ragent StreamChatPipeline#retrieve: retrieval errors bubble up
+                # (channel-level fallback lives inside the engine). Silently degrading
+                # to empty evidence is what let the model fabricate citations.
+                context_top_k = self.search_channel_config.default_top_k
+                hits = await self.retriever.retrieve(
+                    sq,
+                    scope_resolved.collections or None,
+                    RetrievalBudget(
+                        recall_budget=self.search_channel_config.resolve_recall_budget(context_top_k),
+                        candidate_limit=self.search_channel_config.fusion.rerank_candidate_limit,
+                        context_top_k=context_top_k,
+                    ),
+                    timing=_engine_timing,
+                )
+                kb_hits.extend(hits)
+            # 五段归因：检索段=通道执行+RRF 融合（含子查询串行累积）；精排/门控单列
+            _ttft["retrieve_ms"] = round((time.perf_counter() - _t0_retrieve) * 1000, 1)
+            _ttft["rerank_ms"] = _engine_timing.get("Rerank")
+            _ttft["gate_ms"] = _engine_timing.get("RelevanceGate")
+
+        # 6) 来源装配（1:1 翻译 ragent SourcesAssembler.assemble）
+        source_refs: list[SourceRef] = self.sources_assembler.assemble(kb_hits, self.doc_meta_provider)
+        scope["_sources"] = [asdict(s) for s in source_refs]
+
+        # 7) Prompt 编排（1:1 翻译 ragent RAGPromptService.plan + buildStructuredMessages）
+        # 7a) 上下文格式化：1:1 翻译 ragent DefaultContextFormatter.formatKbContext / formatMcpContext
+        formatter = self.prompt_service.formatter
+        eligible_ids = {s.node.id for s in (mcp_intents + kb_intents) if s.node and s.node.id}
+        kb_context = formatter.format_kb_context(
+            kb_intents, eligible_ids, kb_hits, self.search_channel_config.default_top_k
+        ) if kb_hits else ""
+        # 1:1 翻译 ragent formatMcpContext 签名：Map<toolId, List<CallToolResult>>
+        tool_results: dict[str, list[dict]] = {}
+        for rec in mcp_records:
+            tool_id = rec.get("tool_id", "")
+            if tool_id:
+                tool_results.setdefault(tool_id, []).append(rec)
+        mcp_context = formatter.format_mcp_context(
+            tool_results, list(mcp_intents)
+        ) if tool_results else ""
+
+        prompt_ctx = PromptContext(
+            question=question,
+            kb_context=kb_context,
+            mcp_context=mcp_context,
+            mcp_intents=list(mcp_intents),
+            kb_intents=list(kb_intents),
+            eligible_intent_ids=eligible_ids,
+        )
+        plan: PromptPlan = self.prompt_service.plan(prompt_ctx)
+        if plan.base_template is None:
+            # EMPTY 场景：1:1 对应 ragent RAGPromptService.plan 抛 IllegalStateException
+            yield {"type": "response", "delta": "当前可用信息不足以回答该问题。"}
+            return
+
+        # 7b) CitationContextEnricher 注入 ref="N"（1:1 翻译 ragent CitationContextEnricher.enrich）
+        if source_refs and self.citation_enricher.citation_enabled:
+            prompt_ctx.kb_context = self.citation_enricher.enrich(
+                prompt_ctx.kb_context, source_refs
+            )
+
+        # 7c) buildSystemPrompt + buildStructuredMessages
+        structured = self.prompt_service.build_structured_messages(plan, prompt_ctx)
+
+        # 7d) 红队防护第 2 层：轨迹审计 —— 对「原问题 + rewrite 子问题」做弱信号扫描，
+        #     命中 ≥2 类即虚构引用诱导强信号 → 动态注入针对性防编造守则（生成前收紧行为）。
+        #     与第 1 层分工：不短路拒答，误伤代价仅为一段额外 system 文本。
+        if GUARD_ENABLED:
+            traj_audit = self.trajectory_auditor.audit(question, sub_queries, history)
+            if traj_audit.injected:
+                _logger.warning(
+                    "[guard] trajectory suspicious signals=%s q=%.120s",
+                    traj_audit.signals, question,
+                )
+                scope["_guard"] = {
+                    "layer": "trajectory",
+                    "signals": traj_audit.signals,
+                }
+                _traj_constraints = traj_audit.constraints or TRAJECTORY_CONSTRAINTS
+                for _m in structured.get("system", []):
+                    if _m.get("role") == "system":
+                        _m["content"] = str(_m.get("content") or "") + _traj_constraints
+
+        # 8) 注入会话历史
+        # system 白名单：Java 记忆服务把「滚动摘要」装饰成 system 角色混在 history 首条，
+        # 放行后落位为主 system 之后、对话之前（多段 system 为业界惯例）
+        messages: list[dict] = list(structured["system"])
+        # 8a) 注入会话状态卡（agent 自主记忆：跨窗口持久的结构化状态，由 server 层加载进 scope）
+        session_state = scope.get("session_state")
+        if isinstance(session_state, dict) and any(session_state.values()):
+            messages.append({"role": "system", "content": build_state_card_prompt(session_state)})
+        for h in history:
+            role = h.get("role")
+            content = h.get("content")
+            if role in ("user", "assistant", "system") and content:
+                messages.append({"role": role, "content": content})
+        messages.extend(structured["user"])
+
+        # 8) 流式生成 + 红队输出防护（第 3 层）：命中可执行载荷即断流补拒答（CodeShield 角色替代）
+        # memory_filter：流上剥离 agent 自主输出的 <memory_delta> 块（不透传给用户），
+        # 捕获原文写入 scope["_memory_delta"] 供 server 层解析入库（note-taking 决策捕获）
+        out_guard = OutputGuard()
+        memory_filter = MemoryDeltaFilter()
+        _t0_llm = time.perf_counter()
+        try:
+            # 贪婪解码：回答生成与判案链同口径（默认 0.3 的采样方差是 v2b/v2c 答案漂移根源）
+            async for token in self.llm.stream(messages, temperature=0.0):
+                if _ttft["llm_first_ms"] is None:
+                    _ttft["llm_first_ms"] = round((time.perf_counter() - _t0_llm) * 1000, 1)
+                if isinstance(token, dict) and token.get("type") == "response":
+                    clean = memory_filter.feed(str(token.get("delta") or ""))
+                    if not clean:
+                        continue  # 内容全部落入 memory_delta 捕获区，不透传
+                    verdict = out_guard.feed(clean)
+                    if verdict.blocked or verdict.truncated_len:
+                        if verdict.blocked:
+                            _logger.warning(
+                                "[guard] output blocked rule=%s matched=%r",
+                                verdict.rule_id, verdict.matched,
+                            )
+                            scope["_guard"] = {
+                                "layer": "output", "rule": verdict.rule_id,
+                                "matched": verdict.matched,
+                            }
+                            scope["_memory_delta"] = ""  # 拒答路径不写记忆
+                        yield {"type": "response", "delta": out_guard.suffix}
+                        return
+                    token = {**token, "delta": clean}
+                yield token
+        except Exception as e:  # noqa: BLE001
+            yield {"type": "response", "delta": f"\n[生成失败: {e}]"}
+        # 补发尾部缓冲（无 memory_delta 时通常 ≤13 字符的滞留），并带出捕获结果
+        tail = memory_filter.finish()
+        if tail:
+            yield {"type": "response", "delta": tail}
+        if "_memory_delta" not in scope:
+            scope["_memory_delta"] = memory_filter.captured_text
+
+    def _is_system_only(self, sub_intents: list[SubQuestionIntent]) -> bool:
+        """1:1 翻译 ragent IntentResolver.isSystemOnly。
+
+        判断意图是否全部为SYSTEM类型（纯系统响应，不需要检索）。
+        """
+        if not sub_intents:
+            return False
+        for si in sub_intents:
+            if not si.node_scores:
+                return False
+            for ns in si.node_scores:
+                if ns.node is None or ns.node.kind != IntentKind.SYSTEM:
+                    return False
+        return True
+
+    def _extract_system_prompt(self, sub_intents: list[SubQuestionIntent]) -> str | None:
+        """1:1 翻译 ragent handleSystemOnly 中提取自定义Prompt逻辑。
+
+        从SYSTEM意图节点中提取自定义Prompt模板。
+        """
+        for si in sub_intents:
+            for ns in si.node_scores:
+                if ns.node and ns.node.prompt_template:
+                    return ns.node.prompt_template
+        return None
+
+    async def _stream_system_response(
+        self,
+        question: str,
+        history: list[dict],
+        custom_prompt: str | None = None,
+    ) -> AsyncIterator[dict]:
+        """1:1 翻译 ragent streamSystemResponse。
+
+        纯系统响应：直接使用系统Prompt + 会话历史 + 用户问题，不进行检索。
+        """
+        system_prompt = custom_prompt or self._get_default_system_prompt()
+        # 红队防护第 2 层：SYSTEM 直答通道同样追加安全守则
+        if GUARD_ENABLED:
+            system_prompt = system_prompt + HARDENING_RULES
+        messages: list[dict] = [{"role": "system", "content": system_prompt}]
+        # 注入会话历史（system 白名单放行滚动摘要，同主链路）
+        for h in history:
+            role = h.get("role")
+            content = h.get("content")
+            if role in ("user", "assistant", "system") and content:
+                messages.append({"role": role, "content": content})
+        messages.append({"role": "user", "content": question})
+
+        # SYSTEM 直答同样走输出防护（第 3 层）
+        out_guard = OutputGuard()
+        try:
+            # SYSTEM 直答同样贪婪解码，消除 run 间采样方差（成分1修复）
+            async for token in self.llm.stream(messages, temperature=0.0):
+                if isinstance(token, dict) and token.get("type") == "response":
+                    verdict = out_guard.feed(str(token.get("delta") or ""))
+                    if verdict.blocked or verdict.truncated_len:
+                        if verdict.blocked:
+                            _logger.warning(
+                                "[guard] output(system) blocked rule=%s matched=%r",
+                                verdict.rule_id, verdict.matched,
+                            )
+                        yield {"type": "response", "delta": out_guard.suffix}
+                        return
+                yield token
+        except Exception as e:  # noqa: BLE001
+            yield {"type": "response", "delta": f"\n[生成失败: {e}]"}
+
+    def _get_default_system_prompt(self) -> str:
+        """获取默认系统Prompt。"""
+        from core.agent_profile import AgentProfile
+        try:
+            profile = AgentProfile.get_default()
+            if profile and profile.system_prompt:
+                return profile.system_prompt
+        except Exception as e:  # noqa: BLE001
+            _logger.warning("读取默认 AgentProfile 失败，回退内置系统提示词: %s", e)
+        return "你是一个智能助手，请根据用户问题提供准确、有帮助的回答。"
+
+    async def generate_title(self, question: str) -> str:
+        """生成会话标题（替代 Java 侧本地 LLM 标题生成）。失败降级为问题截断。"""
+        try:
+            resp = await self.llm.chat([
+                {"role": "system", "content": "用不超过 20 个字概括用户问题，只输出标题本身，不要标点结尾、不要解释。"},
+                {"role": "user", "content": question},
+            ], max_tokens=32)
+            title = (resp or "").strip().strip("。").strip("\n")
+            if title:
+                return title[:40]
+        except Exception as e:  # noqa: BLE001
+            _logger.debug("生成会话标题失败，回退问题截断: %s", e)
+        return question[:30] if question else "新对话"
+
+    async def recommend_questions(self, question: str, answer: str, chunks: list[dict]) -> list[str]:
+        """生成推荐追问（替代 Java 侧本地 LLM 推荐）。失败返回空。"""
+        ctx = "\n".join(f"- {c.get('doc_name', '')}: {c.get('text', '')}" for c in (chunks or [])[:5])
+        prompt = (
+            "基于下面的问答，提出 3 个用户可能想继续追问的问题。每行一个，不要编号，不要解释。\n"
+            f"用户问题：{question}\n回答：{answer}\n参考文档：\n{ctx}"
+        )
+        try:
+            resp = await self.llm.chat([
+                {"role": "system", "content": "你是追问生成器，只输出问题列表。"},
+                {"role": "user", "content": prompt},
+            ], max_tokens=200)
+            lines = [ln.strip("0123456789.、- ").strip() for ln in (resp or "").splitlines()]
+            return [ln for ln in lines if ln][:3]
+        except Exception as e:  # noqa: BLE001
+            _logger.debug("生成推荐追问失败，返回空列表: %s", e)
+            return []

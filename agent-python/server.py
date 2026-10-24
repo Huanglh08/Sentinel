@@ -64,7 +64,7 @@ from core.intent.cache import IntentTreeCacheManager
 from core.intent.loader import InMemoryIntentLoader, RedisBackedIntentLoader
 from core.intent.service import InMemoryIntentTreeService
 from core.intent import IntentResolver
-from core.retrieval.engine import ChannelConfig, MultiChannelRetrievalEngine, RetrievalConfig
+from core.retrieval.engine import ChannelConfig, HeadChunkDemotionPostProcessor, MultiChannelRetrievalEngine, RetrievalConfig
 from core.retrieval.diversity import doc_diversity_backup
 from core.retrieval.external_channels import LightRagBackend, LightRagConfig, YouComWebSearchBackend, WebSearchConfig
 from core.retrieval.rerank import SiliconFlowReranker, LLMReranker, RoutingReranker
@@ -354,6 +354,11 @@ def _build_retrieval_engine(application: FastAPI) -> tuple[MultiChannelRetrieval
         gate_bge_threshold=rag_config.gate_bge_threshold,
         gate_qwen3_threshold=rag_config.gate_qwen3_threshold,
         gate_top_n=rag_config.gate_top_n,
+        # 窗口组装层消融开关（分层冻结实验法：默认值全部保持 v3 行为）
+        head_demote_enabled=os.getenv("RAG_HEAD_DEMOTE", "false").strip().lower() in ("1", "true", "yes"),
+        diversity_enabled=os.getenv("RAG_DIVERSITY_ENABLED", "true").strip().lower() in ("1", "true", "yes"),
+        diversity_max_per_doc=int(os.getenv("RAG_DIVERSITY_MAX_PER_DOC", "0").strip() or "0"),
+        diversity_min_score=float(os.getenv("RAG_DIVERSITY_MIN_SCORE", "0").strip() or "0"),
     )
     reranker = RoutingReranker([
         SiliconFlowReranker(),
