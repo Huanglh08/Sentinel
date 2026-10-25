@@ -9,6 +9,11 @@ import threading
 import time
 import uuid
 
+if os.name == "nt":
+    # Windows 默认 ProactorEventLoop；异步 psycopg（案件图引擎检查点）只支持 Selector。
+    # 必须在事件循环创建前设置，uvicorn 导入本模块时即生效；本项目无异步子进程用法，切换无副作用。
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 # 必须先于任何 os.getenv / from_env()：pydantic-settings 读 .env 不注入 os.environ，
 # 裸读 os.environ 的配置（如 RAG_SEARCH_CHANNELS_KEYWORD_ENABLED、RAG_KEYWORD_CHANNEL_ENABLED）会静默失效
 from dotenv import load_dotenv
@@ -924,17 +929,45 @@ async def case_patrol_run(payload: PatrolRunRequest, request: Request, user=Depe
     return {"success": bool(result.get("started")), **result}
 
 
+def _case_graph_enabled() -> bool:
+    """图引擎开关：环境变量 CASE_GRAPH_ENGINE（默认关，回落旧引擎）。"""
+    return os.getenv("CASE_GRAPH_ENGINE", "0").strip().lower() in {"1", "true", "on"}
+
+
+def _get_case_graph_engine(request: Request):
+    """惰性构造图引擎；开关关闭或依赖缺失时返回 None（走旧引擎）。"""
+    eng = getattr(request.app.state, "case_graph_engine", None)
+    if eng is None:
+        if not _case_graph_enabled():
+            request.app.state.case_graph_engine = False
+            return None
+        try:
+            from core.case.graph_engine import CaseGraphEngine
+
+            eng = CaseGraphEngine(_get_case_agent(request))
+            _logger.info("case graph engine enabled")
+        except Exception:  # noqa: BLE001
+            _logger.exception("case graph engine init failed; fallback to legacy loop")
+            eng = False
+        request.app.state.case_graph_engine = eng
+    return eng or None
+
+
 @app.post("/case/investigate")
 async def case_investigate(payload: CaseInvestigateRequest, request: Request, user=Depends(get_current_user)):
     """线索 -> 分诊 -> 受控多步调查 -> 结构化报告（SSE 逐步推送证据链）。"""
     case_agent = _get_case_agent(request)
+    engine = _get_case_graph_engine(request)
     user_id = getattr(user, "username", None) or getattr(user, "id", None) or "anonymous"
 
     async def events() -> AsyncIterator[str]:
         try:
-            async for event in case_agent.investigate(
+            source_iter = engine.investigate(
                 payload.clue, user_id=str(user_id), source=payload.source, alert_id=payload.alert_id
-            ):
+            ) if engine else case_agent.investigate(
+                payload.clue, user_id=str(user_id), source=payload.source, alert_id=payload.alert_id
+            )
+            async for event in source_iter:
                 if await request.is_disconnected():
                     raise asyncio.CancelledError()
                 yield f"event: message\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
@@ -944,6 +977,33 @@ async def case_investigate(payload: CaseInvestigateRequest, request: Request, us
         except Exception as exc:
             _logger.exception("case investigate failed")
             yield f"event: error\ndata: {json.dumps({'success': False, 'code': 'CASE_ERROR', 'message': str(exc)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.post("/case/{case_id}/resume")
+async def case_resume(case_id: str, request: Request, user=Depends(get_current_user)):
+    """中断续跑：从最近检查点回放已完成步骤并继续调查（SSE，事件协议与调查一致）。
+
+    仅限状态仍为「调查中」且无报告的案件；进程内条件抢占，同一案件同时只允许一个续跑。
+    """
+    engine = _get_case_graph_engine(request)
+    if engine is None:
+        raise HTTPException(status_code=409, detail="续跑引擎未启用（CASE_GRAPH_ENGINE 未开或依赖缺失）")
+    user_id = getattr(user, "username", None) or getattr(user, "id", None) or "anonymous"
+
+    async def events() -> AsyncIterator[str]:
+        try:
+            async for event in engine.resume(case_id, user_id=str(user_id)):
+                if await request.is_disconnected():
+                    raise asyncio.CancelledError()
+                yield f"event: message\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+            yield "event: end\ndata: {\"status\": \"done\"}\n\n"
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            _logger.exception("case resume failed")
+            yield f"event: error\ndata: {json.dumps({'success': False, 'code': 'CASE_RESUME_ERROR', 'message': str(exc)}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 

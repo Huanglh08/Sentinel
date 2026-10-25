@@ -173,8 +173,10 @@ class CaseStore:
         user_id: str = "",
         source: str = "MANUAL",
         fingerprint: str = "",
+        case_id: str = "",
     ) -> dict:
-        case_id = next_message_id()
+        # case_id 可由图引擎预生成传入（检查点线程号=案件号，续跑按案件号寻址），缺省仍走雪花
+        case_id = case_id or next_message_id()
         case_no = f"CASE-{self._now().strftime('%Y%m%d')}-{case_id[-6:]}"
         status = CASE_STATUS_INVESTIGATING
         if self.enabled:
@@ -299,9 +301,25 @@ class CaseStore:
     # 证据链
     # ------------------------------------------------------------------
     def append_evidence(self, case_id: str, step: EvidenceStep) -> None:
+        self._write_evidence(case_id, step, replace=False)
+
+    def replace_evidence_step(self, case_id: str, step: EvidenceStep) -> None:
+        """幂等落单步证据：先清同案同步号同阶段旧行再写入。
+
+        图引擎每完成一步立即落库；断点续跑重放同一步时不会产生重复行
+        （重放步的检查点里没有该步，重算后覆盖写入）。
+        """
+        self._write_evidence(case_id, step, replace=True)
+
+    def _write_evidence(self, case_id: str, step: EvidenceStep, *, replace: bool) -> None:
         if self.enabled:
             try:
                 with get_pool().connection() as conn, conn.cursor() as cur:
+                    if replace:
+                        cur.execute(
+                            "DELETE FROM t_case_evidence WHERE case_id=%s AND step_no=%s AND phase=%s",
+                            (case_id, step.step_no, step.phase),
+                        )
                     cur.execute(
                         "INSERT INTO t_case_evidence (id, case_id, step_no, phase, thought, "
                         "tool_id, tool_args, observation, is_error, elapsed_ms, tool_status, "
@@ -325,7 +343,13 @@ class CaseStore:
                     )
             except Exception:  # noqa: BLE001
                 logger.exception("[case] 证据写入失败 case=%s step=%s", case_id, step.step_no)
-        self._mem_evidence.setdefault(case_id, []).append(step.to_dict())
+        bucket = self._mem_evidence.setdefault(case_id, [])
+        if replace:
+            bucket[:] = [
+                s for s in bucket
+                if not (s.get("step_no") == step.step_no and s.get("phase") == step.phase)
+            ]
+        bucket.append(step.to_dict())
 
     # ------------------------------------------------------------------
     # 查询
@@ -767,18 +791,51 @@ class CaseStore:
         if self.enabled:
             try:
                 with get_pool().connection() as conn, conn.cursor() as cur:
-                    cur.executemany(
-                        "INSERT INTO t_case_action (id, case_id, case_no, approval_id, "
-                        "action, detail, status, operator, create_time) "
-                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                        rows,
-                    )
+                    try:
+                        # 防重放：L1/L2 自动动作同案同动作唯一（部分唯一索引 uq_case_auto_action）。
+                        # 索引未就位（DDL 未执行）时推断失败，退回普通插入重试一次。
+                        cur.executemany(
+                            "INSERT INTO t_case_action (id, case_id, case_no, approval_id, "
+                            "action, detail, status, operator, create_time) "
+                            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+                            "ON CONFLICT (case_id, action) "
+                            "WHERE operator IN ('L1:auto', 'L2:auto') DO NOTHING",
+                            rows,
+                        )
+                    except Exception:  # noqa: BLE001
+                        cur.executemany(
+                            "INSERT INTO t_case_action (id, case_id, case_no, approval_id, "
+                            "action, detail, status, operator, create_time) "
+                            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                            rows,
+                        )
             except Exception:  # noqa: BLE001
                 logger.exception("[case] 处置动作写入失败 case=%s（降级内存）", case_id)
                 self.enabled = False
         for rec in created:
             self._mem_actions[rec["id"]] = dict(rec)
         return created
+
+    def existing_auto_action_keys(self, case_id: str, operator: str) -> set[str]:
+        """已落库的指定操作者自动处置动作文本集合（断点续跑防重放：重放前先查重）。"""
+        keys: set[str] = set()
+        if self.enabled:
+            try:
+                with get_pool().connection() as conn, conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT action FROM t_case_action WHERE case_id=%s AND operator=%s",
+                        (case_id, operator),
+                    )
+                    keys = {r[0] for r in cur.fetchall()}
+            except Exception:  # noqa: BLE001
+                logger.exception("[case] 自动处置动作查重失败 case=%s", case_id)
+        else:
+            keys = {
+                a.get("action", "")
+                for a in self._mem_actions.values()
+                if a.get("case_id") == case_id and a.get("operator") == operator
+            }
+        return keys
 
     def list_actions(self, case_id: str, limit: int = 100) -> list[dict]:
         """案件处置动作列表，按创建时间倒序。"""

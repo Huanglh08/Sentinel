@@ -1073,17 +1073,18 @@ class CaseInvestigationAgent:
     # ------------------------------------------------------------------
     # ② Investigate：受控 ReAct 循环 + 四道护栏
     # ------------------------------------------------------------------
-    async def _investigate(
-        self, clue: str, triage: TriageResult, alert_id: str = ""
-    ) -> tuple[list[EvidenceStep], str]:
+    async def _react_seed_messages(
+        self, clue: str, triage: TriageResult, catalog: list[dict] | None = None
+    ) -> list[dict]:
+        """ReAct 初始消息（旧引擎与图引擎共用，保证两条链路同参不漂移）。"""
         # SOP 全文按需注入（分诊匹配到的技能）
         sop_text = ""
         skill = self.skills.get(triage.skill)
         if skill:
             sop_text = f"\n\n已匹配 SOP 技能《{skill.name}》，请按其步骤顺序调查:\n{skill.body}"
 
-        catalog = await self._load_catalog()
-        allowed = {t["tool_id"] for t in catalog}
+        if catalog is None:
+            catalog = await self._load_catalog()
         system = self._slot_prompt("CASE_INVESTIGATOR", _INVESTIGATOR_SYSTEM).replace(
             "__TOOL_CATALOG__", _tool_catalog_text(catalog)
         )
@@ -1092,10 +1093,17 @@ class CaseInvestigationAgent:
             f"分诊结论:\n{json.dumps(triage.to_dict(), ensure_ascii=False)}"
             f"{sop_text}\n\n请开始第 1 步调查。"
         )
-        messages: list[dict] = [
+        return [
             {"role": "system", "content": system},
             {"role": "user", "content": context},
         ]
+
+    async def _investigate(
+        self, clue: str, triage: TriageResult, alert_id: str = ""
+    ) -> tuple[list[EvidenceStep], str]:
+        catalog = await self._load_catalog()
+        allowed = {t["tool_id"] for t in catalog}
+        messages: list[dict] = await self._react_seed_messages(clue, triage, catalog)
 
         steps: list[EvidenceStep] = []
         call_counter: Counter[str] = Counter()
@@ -1104,119 +1112,162 @@ class CaseInvestigationAgent:
         deadline = time.monotonic() + self.max_total_sec
 
         for step_no in range(1, self.max_steps + 1):
-            if time.monotonic() > deadline:
-                forced_stop_reason = "总时长超限"
-                break
-            raw = await self.llm.chat(messages, max_tokens=600, temperature=0.0)
-            action = _extract_json(raw)
-            if action is None:
-                step = EvidenceStep(
-                    step_no=step_no,
-                    phase=PHASE_INVESTIGATE,
-                    thought="输出不是合法 JSON",
-                    observation=raw[:800],
-                    is_error=True,
-                )
-                steps.append(step)
-                messages.append({"role": "assistant", "content": raw[:1500]})
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": "输出格式错误：必须是单个 JSON 对象（action=tool 或 finish）。请重新输出。",
-                    }
-                )
-                continue
-
-            thought = str(action.get("thought", ""))
-            act = str(action.get("action", "tool"))
-
-            if act == "finish":
-                steps.append(
-                    EvidenceStep(
-                        step_no=step_no,
-                        phase=PHASE_INVESTIGATE,
-                        thought=thought,
-                        tool_id="llm.finish",
-                        observation=str(action.get("conclusion", "")),
-                    )
-                )
-                break
-
-            tool_id = str(action.get("tool_id", "")).strip()
-            args = action.get("args") if isinstance(action.get("args"), dict) else {}
-            if alert_id and tool_id in _ALERT_SCOPED_TOOLS:
-                # 覆盖而非 setdefault：模型自带的值不可信，隔离范围必须由服务端定
-                args = {**args, "alert_id": alert_id}
-            if tool_id in _STRUCTURED_TOOLS:
-                args = {**args, "structured": True}
-            step = EvidenceStep(
-                step_no=step_no, phase=PHASE_INVESTIGATE, thought=thought, tool_id=tool_id, tool_args=args
+            route, repeat_warned, forced = await self._react_once(
+                clue=clue,
+                triage=triage,
+                alert_id=alert_id,
+                allowed=allowed,
+                messages=messages,
+                steps=steps,
+                call_counter=call_counter,
+                repeat_warned=repeat_warned,
+                step_no=step_no,
+                deadline=deadline,
             )
-            started = time.monotonic()
-
-            # 护栏 a: 白名单（动态目录）
-            if tool_id not in allowed:
-                step.is_error = True
-                step.observation = f"[护栏] 工具 {tool_id} 不在白名单内，可用工具: {', '.join(sorted(allowed))}"
-            else:
-                # 护栏 b: 重复调用熔断
-                key = tool_id + "|" + hashlib.md5(
-                    json.dumps(args, ensure_ascii=False, sort_keys=True).encode("utf-8")
-                ).hexdigest()
-                call_counter[key] += 1
-                if call_counter[key] >= 3:
-                    forced_stop_reason = f"重复调用熔断（{tool_id} 同参数已调用 {call_counter[key]} 次）"
-                    step.is_error = True
-                    step.observation = f"[护栏] {forced_stop_reason}，强制收尾"
-                    steps.append(step)
-                    break
-                repeat_note = ""
-                if call_counter[key] == 2 and not repeat_warned:
-                    repeat_warned = True
-                    # 警告必须随 observation 进入下一轮 messages，LLM 才能感知并换向；
-                    # 否则只设标志位等于没有警告，白白走到第 3 次硬熔断
-                    repeat_note = (
-                        f"\n[护栏] 警告: {tool_id} 同参数已重复调用 2 次，"
-                        "请立即更换参数或换用其他工具，再次重复将被强制熔断"
-                    )
-                try:
-                    is_error, raw_text = await self.mcp.call(tool_id, args)
-                    step.is_error = is_error
-                    # 结构化信封：status=hit/miss/error 进代码判定，text 才是给 LLM 的观察值
-                    text, meta = _parse_structured_observation(raw_text)
-                    if meta:
-                        step.tool_status = str(meta.get("status") or "")
-                        step.record_count = int(meta.get("count") or 0)
-                        if isinstance(meta.get("summary"), dict):
-                            step.data_summary = meta["summary"]
-                    # 护栏 e（间接注入）: 工具返回值属外部数据，指令性注入行消毒为占位标记
-                    text, inj_hits = sanitize_observation(text)
-                    if inj_hits:
-                        step.injection_suspected = True
-                        logger.warning(
-                            "间接注入防护: step=%s tool=%s 命中注入指令 %d 处，已消毒",
-                            step_no, tool_id, inj_hits,
-                        )
-                    # 护栏 c: 观察截断（警告追加在截断之后，保证不被截掉）
-                    step.observation = _truncate(text, self.observation_max_chars) + repeat_note
-                except Exception as e:  # noqa: BLE001
-                    step.is_error = True
-                    step.observation = f"[异常] {type(e).__name__}: {e}"
-            step.elapsed_ms = int((time.monotonic() - started) * 1000)
-            steps.append(step)
-            messages.append({"role": "assistant", "content": raw[:1500]})
-            # 外部内容标记: 观察值进 LLM 前加数据边界声明（软防御，配合消毒双保险）。
-            # CASE_PLAIN_OBS=1 时退回旧格式（A/B 对照用），消毒与留痕不受影响。
-            if os.environ.get("CASE_PLAIN_OBS") == "1":
-                messages.append({"role": "user", "content": f"第 {step_no} 步观察结果:\n{step.observation}"})
-            else:
-                messages.append({
-                    "role": "user",
-                    "content": wrap_observation(step_no, step.observation, 1 if step.injection_suspected else 0),
-                })
+            if forced:
+                forced_stop_reason = forced
+            if route in {"finish", "break"}:
+                break
         else:
             forced_stop_reason = forced_stop_reason or f"步数达到上限 {self.max_steps}"
 
+        await self._supplement_sales(triage, steps, alert_id)
+        return steps, forced_stop_reason
+
+    async def _react_once(
+        self,
+        *,
+        clue: str,
+        triage: TriageResult,
+        alert_id: str,
+        allowed: set[str],
+        messages: list[dict],
+        steps: list[EvidenceStep],
+        call_counter: Counter[str],
+        repeat_warned: bool,
+        step_no: int,
+        deadline: float,
+    ) -> tuple[str, bool, str]:
+        """调查原子操作：单步 ReAct 迭代，旧引擎与图引擎共用（断点续跑按步重放）。
+
+        返回 (route, repeat_warned, forced_stop_reason)；route 取值:
+        "finish" 模型主动收尾 / "break" 熔断或超时强制收尾 / "continue" 继续下一步。
+        """
+        if time.monotonic() > deadline:
+            return "break", repeat_warned, "总时长超限"
+        raw = await self.llm.chat(messages, max_tokens=600, temperature=0.0)
+        action = _extract_json(raw)
+        if action is None:
+            step = EvidenceStep(
+                step_no=step_no,
+                phase=PHASE_INVESTIGATE,
+                thought="输出不是合法 JSON",
+                observation=raw[:800],
+                is_error=True,
+            )
+            steps.append(step)
+            messages.append({"role": "assistant", "content": raw[:1500]})
+            messages.append(
+                {
+                    "role": "user",
+                    "content": "输出格式错误：必须是单个 JSON 对象（action=tool 或 finish）。请重新输出。",
+                }
+            )
+            return "continue", repeat_warned, ""
+
+        thought = str(action.get("thought", ""))
+        act = str(action.get("action", "tool"))
+
+        if act == "finish":
+            steps.append(
+                EvidenceStep(
+                    step_no=step_no,
+                    phase=PHASE_INVESTIGATE,
+                    thought=thought,
+                    tool_id="llm.finish",
+                    observation=str(action.get("conclusion", "")),
+                )
+            )
+            return "finish", repeat_warned, ""
+
+        tool_id = str(action.get("tool_id", "")).strip()
+        args = action.get("args") if isinstance(action.get("args"), dict) else {}
+        if alert_id and tool_id in _ALERT_SCOPED_TOOLS:
+            # 覆盖而非 setdefault：模型自带的值不可信，隔离范围必须由服务端定
+            args = {**args, "alert_id": alert_id}
+        if tool_id in _STRUCTURED_TOOLS:
+            args = {**args, "structured": True}
+        step = EvidenceStep(
+            step_no=step_no, phase=PHASE_INVESTIGATE, thought=thought, tool_id=tool_id, tool_args=args
+        )
+        started = time.monotonic()
+
+        # 护栏 a: 白名单（动态目录）
+        if tool_id not in allowed:
+            step.is_error = True
+            step.observation = f"[护栏] 工具 {tool_id} 不在白名单内，可用工具: {', '.join(sorted(allowed))}"
+        else:
+            # 护栏 b: 重复调用熔断
+            key = tool_id + "|" + hashlib.md5(
+                json.dumps(args, ensure_ascii=False, sort_keys=True).encode("utf-8")
+            ).hexdigest()
+            call_counter[key] += 1
+            if call_counter[key] >= 3:
+                reason = f"重复调用熔断（{tool_id} 同参数已调用 {call_counter[key]} 次）"
+                step.is_error = True
+                step.observation = f"[护栏] {reason}，强制收尾"
+                steps.append(step)
+                return "break", repeat_warned, reason
+            repeat_note = ""
+            if call_counter[key] == 2 and not repeat_warned:
+                repeat_warned = True
+                # 警告必须随 observation 进入下一轮 messages，LLM 才能感知并换向；
+                # 否则只设标志位等于没有警告，白白走到第 3 次硬熔断
+                repeat_note = (
+                    f"\n[护栏] 警告: {tool_id} 同参数已重复调用 2 次，"
+                    "请立即更换参数或换用其他工具，再次重复将被强制熔断"
+                )
+            try:
+                is_error, raw_text = await self.mcp.call(tool_id, args)
+                step.is_error = is_error
+                # 结构化信封：status=hit/miss/error 进代码判定，text 才是给 LLM 的观察值
+                text, meta = _parse_structured_observation(raw_text)
+                if meta:
+                    step.tool_status = str(meta.get("status") or "")
+                    step.record_count = int(meta.get("count") or 0)
+                    if isinstance(meta.get("summary"), dict):
+                        step.data_summary = meta["summary"]
+                # 护栏 e（间接注入）: 工具返回值属外部数据，指令性注入行消毒为占位标记
+                text, inj_hits = sanitize_observation(text)
+                if inj_hits:
+                    step.injection_suspected = True
+                    logger.warning(
+                        "间接注入防护: step=%s tool=%s 命中注入指令 %d 处，已消毒",
+                        step_no, tool_id, inj_hits,
+                    )
+                # 护栏 c: 观察截断（警告追加在截断之后，保证不被截掉）
+                step.observation = _truncate(text, self.observation_max_chars) + repeat_note
+            except Exception as e:  # noqa: BLE001
+                step.is_error = True
+                step.observation = f"[异常] {type(e).__name__}: {e}"
+        step.elapsed_ms = int((time.monotonic() - started) * 1000)
+        steps.append(step)
+        messages.append({"role": "assistant", "content": raw[:1500]})
+        # 外部内容标记: 观察值进 LLM 前加数据边界声明（软防御，配合消毒双保险）。
+        # CASE_PLAIN_OBS=1 时退回旧格式（A/B 对照用），消毒与留痕不受影响。
+        if os.environ.get("CASE_PLAIN_OBS") == "1":
+            messages.append({"role": "user", "content": f"第 {step_no} 步观察结果:\n{step.observation}"})
+        else:
+            messages.append({
+                "role": "user",
+                "content": wrap_observation(step_no, step.observation, 1 if step.injection_suspected else 0),
+            })
+        return "continue", repeat_warned, ""
+
+    async def _supplement_sales(
+        self, triage: TriageResult, steps: list[EvidenceStep], alert_id: str
+    ) -> None:
+        """交易类主体必查交易数据（服务端强制补充，只补缺失的一次）。"""
         # 交易类主体必查交易数据：模型可能只查工单/设备就收尾，补出来的历史曲线等于白造。
         # 只补缺失的一次，已有成功调用时不动，保证结果可解释、不多花工具调用。
         if triage.subject_type in {"merchant", "order", "payment"} and triage.subject_id and not any(
@@ -1251,8 +1302,6 @@ class CaseInvestigationAgent:
                 steps.append(step)
             except Exception as e:  # noqa: BLE001
                 logger.warning("[case] 商户交易基线补充查询失败: %s", e)
-
-        return steps, forced_stop_reason
 
     # ------------------------------------------------------------------
     # ③ Report：结构化报告 + 一次纠偏重试 + 兜底报告

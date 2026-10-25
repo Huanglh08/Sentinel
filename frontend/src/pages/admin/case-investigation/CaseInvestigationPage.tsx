@@ -43,12 +43,13 @@ import {
   listApprovals,
   listCases,
   streamInvestigate,
+  streamResume,
   type ApprovalItem,
   type CaseDetail,
   type CaseListItem,
   type InvestigationSseEvent
 } from "@/services/caseService";
-import { Archive, CheckCircle2, FileDown, Gavel, Loader2, Search, XCircle } from "lucide-react";
+import { Archive, CheckCircle2, FileDown, Gavel, Loader2, RotateCcw, Search, XCircle } from "lucide-react";
 
 const STATUS_VARIANT: Record<string, string> = {
   OPEN: "bg-blue-100 text-blue-700",
@@ -92,6 +93,7 @@ export function CaseInvestigationPage() {
   const [source, setSource] = useState("MANUAL");
   const [running, setRunning] = useState(false);
   const [logLines, setLogLines] = useState<StreamLogLine[]>([]);
+  const [resumeOf, setResumeOf] = useState<CaseListItem | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   // 案件详情
@@ -181,6 +183,43 @@ export function CaseInvestigationPage() {
     }
   };
 
+  // 调查/续跑共用：事件 → 日志行
+  const handleStreamEvent = (ev: InvestigationSseEvent) => {
+    if (ev.type === "__end__") {
+      setLogLines((prev) => [...prev, { text: "■ 调查完成", kind: "ok" }]);
+      return;
+    }
+    if (ev.type === "__error__") {
+      setLogLines((prev) => [...prev, { text: `✗ ${ev.message || "调查失败"}`, kind: "error" }]);
+      return;
+    }
+    if (ev.type === "phase") {
+      setLogLines((prev) => [...prev, { text: `▶ 阶段: ${ev.phase} ${ev.status || ""}`, kind: "phase" }]);
+    } else if (ev.type === "case.created") {
+      setLogLines((prev) => [...prev, { text: `● 建案 ${ev.case_no} (${ev.case_id})`, kind: "ok" }]);
+    } else if (ev.type === "step") {
+      setLogLines((prev) => [
+        ...prev,
+        {
+          text: ev.replayed
+            ? `⟲ step${ev.step_no} ${ev.tool_id}（回放）`
+            : `${ev.is_error ? "✗" : "·"} step${ev.step_no} ${ev.tool_id}${ev.is_error ? " [失败]" : ""}`,
+          kind: ev.is_error ? "error" : "step"
+        }
+      ]);
+    } else if (ev.type === "approval.created") {
+      setLogLines((prev) => [...prev, { text: `⚖ 生成 ${ev.approvals?.length || 0} 条人工审批待办`, kind: "ok" }]);
+    } else if (ev.type === "l1.autopass") {
+      setLogLines((prev) => [...prev, { text: `⚡ L1 放权自动放行 ${ev.actions?.length || 0} 条处置建议（已留痕）`, kind: "ok" }]);
+    } else if (ev.type === "report") {
+      const r = ev.report as { conclusion?: string; confidence?: number } | undefined;
+      setLogLines((prev) => [
+        ...prev,
+        { text: `■ 报告: ${r?.conclusion || "-"} (置信度 ${r?.confidence ?? "-"})`, kind: "ok" }
+      ]);
+    }
+  };
+
   const handleInvestigate = async () => {
     if (clue.trim().length < 5) {
       toast.error("线索过短", { description: "至少 5 个字符" });
@@ -191,44 +230,28 @@ export function CaseInvestigationPage() {
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      await streamInvestigate(
-        clue.trim(),
-        source,
-        (ev: InvestigationSseEvent) => {
-          if (ev.type === "__end__") {
-            setLogLines((prev) => [...prev, { text: "■ 调查完成", kind: "ok" }]);
-            return;
-          }
-          if (ev.type === "__error__") {
-            setLogLines((prev) => [...prev, { text: `✗ ${ev.message || "调查失败"}`, kind: "error" }]);
-            return;
-          }
-          if (ev.type === "phase") {
-            setLogLines((prev) => [...prev, { text: `▶ 阶段: ${ev.phase} ${ev.status || ""}`, kind: "phase" }]);
-          } else if (ev.type === "case.created") {
-            setLogLines((prev) => [...prev, { text: `● 建案 ${ev.case_no} (${ev.case_id})`, kind: "ok" }]);
-          } else if (ev.type === "step") {
-            setLogLines((prev) => [
-              ...prev,
-              {
-                text: `${ev.is_error ? "✗" : "·"} step${ev.step_no} ${ev.tool_id}${ev.is_error ? " [失败]" : ""}`,
-                kind: ev.is_error ? "error" : "step"
-              }
-            ]);
-          } else if (ev.type === "approval.created") {
-            setLogLines((prev) => [...prev, { text: `⚖ 生成 ${ev.approvals?.length || 0} 条人工审批待办`, kind: "ok" }]);
-          } else if (ev.type === "l1.autopass") {
-            setLogLines((prev) => [...prev, { text: `⚡ L1 放权自动放行 ${ev.actions?.length || 0} 条处置建议（已留痕）`, kind: "ok" }]);
-          } else if (ev.type === "report") {
-            const r = ev.report as { conclusion?: string; confidence?: number } | undefined;
-            setLogLines((prev) => [
-              ...prev,
-              { text: `■ 报告: ${r?.conclusion || "-"} (置信度 ${r?.confidence ?? "-"})`, kind: "ok" }
-            ]);
-          }
-        },
-        controller.signal
-      );
+      await streamInvestigate(clue.trim(), source, handleStreamEvent, controller.signal);
+      void refreshCases();
+    } catch (e) {
+      if ((e as Error).name !== "AbortError") {
+        setLogLines((prev) => [...prev, { text: `✗ ${e instanceof Error ? e.message : String(e)}`, kind: "error" }]);
+      }
+    } finally {
+      setRunning(false);
+      abortRef.current = null;
+    }
+  };
+
+  // 中断续跑：服务端从最近检查点回放已完成步骤（带回放标记）后从断点继续
+  const handleResume = async (c: CaseListItem) => {
+    setResumeOf(c);
+    setInvestigateOpen(true);
+    setRunning(true);
+    setLogLines([{ text: `⟳ 续跑 ${c.case_no}：回放已完成步骤后从断点继续`, kind: "phase" }]);
+    const controller = new AbortController();
+    abortRef.current = controller;
+    try {
+      await streamResume(c.id, handleStreamEvent, controller.signal);
       void refreshCases();
     } catch (e) {
       if ((e as Error).name !== "AbortError") {
@@ -310,7 +333,7 @@ export function CaseInvestigationPage() {
               <Gavel className="mr-1 h-4 w-4" />
               审批待办
             </Button>
-            <Button size="sm" onClick={() => { setLogLines([]); setInvestigateOpen(true); }}>
+            <Button size="sm" onClick={() => { setResumeOf(null); setLogLines([]); setInvestigateOpen(true); }}>
               <Search className="mr-1 h-4 w-4" />
               发起调查
             </Button>
@@ -400,6 +423,17 @@ export function CaseInvestigationPage() {
                           >
                             <FileDown className="h-4 w-4" />
                           </Button>
+                          {c.status === "INVESTIGATING" && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              title="从最近检查点续跑（先回放已完成步骤）"
+                              onClick={(e) => { e.stopPropagation(); void handleResume(c); }}
+                            >
+                              <RotateCcw className="mr-1 h-4 w-4" />
+                              续跑
+                            </Button>
+                          )}
                           {c.status !== "CLOSED" && (
                             <Button
                               variant="ghost"
@@ -503,37 +537,45 @@ export function CaseInvestigationPage() {
       </Card>
 
       {/* 发起调查 */}
-      <Dialog open={investigateOpen} onOpenChange={(o) => { if (!running) { setInvestigateOpen(o); } }}>
+      <Dialog open={investigateOpen} onOpenChange={(o) => { if (!running) { setInvestigateOpen(o); if (!o) { setResumeOf(null); } } }}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>发起案件调查</DialogTitle>
-            <DialogDescription>输入风控线索，系统将自动分诊、多步调查并输出结构化报告</DialogDescription>
+            <DialogTitle>{resumeOf ? "中断续跑" : "发起案件调查"}</DialogTitle>
+            <DialogDescription>
+              {resumeOf
+                ? `案件 ${resumeOf.case_no}：先回放已完成取证步骤（不重算），再从断点继续调查`
+                : "输入风控线索，系统将自动分诊、多步调查并输出结构化报告"}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
-            <div className="space-y-1">
-              <Label htmlFor="clue">案件线索</Label>
-              <Textarea
-                id="clue"
-                rows={5}
-                placeholder="例：账号 user_9527 十分钟内从同一 IP 发起 327 次登录尝试，命中 89 个不同密码…"
-                value={clue}
-                onChange={(e) => setClue(e.target.value)}
-                disabled={running}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label>线索来源</Label>
-              <Select value={source} onValueChange={setSource} disabled={running}>
-                <SelectTrigger className="w-48">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="MANUAL">人工录入</SelectItem>
-                  <SelectItem value="RULE_ENGINE">规则引擎</SelectItem>
-                  <SelectItem value="MONITOR">监控告警</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            {!resumeOf && (
+              <>
+                <div className="space-y-1">
+                  <Label htmlFor="clue">案件线索</Label>
+                  <Textarea
+                    id="clue"
+                    rows={5}
+                    placeholder="例：账号 user_9527 十分钟内从同一 IP 发起 327 次登录尝试，命中 89 个不同密码…"
+                    value={clue}
+                    onChange={(e) => setClue(e.target.value)}
+                    disabled={running}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label>线索来源</Label>
+                  <Select value={source} onValueChange={setSource} disabled={running}>
+                    <SelectTrigger className="w-48">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="MANUAL">人工录入</SelectItem>
+                      <SelectItem value="RULE_ENGINE">规则引擎</SelectItem>
+                      <SelectItem value="MONITOR">监控告警</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </>
+            )}
             {logLines.length > 0 && (
               <div className="max-h-64 overflow-auto rounded-md bg-gray-950 p-3 font-mono text-xs leading-5">
                 {logLines.map((l, i) => (
@@ -566,9 +608,11 @@ export function CaseInvestigationPage() {
                 <Button variant="outline" onClick={() => setInvestigateOpen(false)}>
                   关闭
                 </Button>
-                <Button onClick={() => void handleInvestigate()} disabled={clue.trim().length < 5}>
-                  开始调查
-                </Button>
+                {!resumeOf && (
+                  <Button onClick={() => void handleInvestigate()} disabled={clue.trim().length < 5}>
+                    开始调查
+                  </Button>
+                )}
               </>
             )}
           </DialogFooter>

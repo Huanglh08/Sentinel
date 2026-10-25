@@ -8,6 +8,7 @@ UPGRADES = Path(__file__).resolve().parent.parent / "backend-java" / "resources"
 SQL_FILES = (
     UPGRADES / "260829_case_investigation.sql",
     UPGRADES / "261018_case_evidence_status.sql",
+    UPGRADES / "261024_case_action_auto_idem.sql",
 )
 
 

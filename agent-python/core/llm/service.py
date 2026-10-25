@@ -197,9 +197,15 @@ class OpenAIStyleLLMService(LLMService):
                 r.raise_for_status()
                 return r.json()["choices"][0]["message"]["content"]
         except httpx.HTTPStatusError as e:
-            # 包装成 LLMError 携带错误类型（429 → RATE_LIMITED），熔断器据此走长冷却
+            # 包装成 LLMError 携带错误类型（429 → RATE_LIMITED），熔断器据此走长冷却；
+            # 带上响应体片段（供应商的 invalid parameter / input length 等原因都在 body 里）
+            body = ""
+            try:
+                body = e.response.text[:300]
+            except Exception:  # noqa: BLE001
+                pass
             raise LLMError(
-                f"LLM chat 失败: {e.response.status_code}",
+                f"LLM chat 失败: {e.response.status_code} {body}",
                 error_type=LLMErrorType.from_http_status(e.response.status_code),
                 cause=e,
             ) from e

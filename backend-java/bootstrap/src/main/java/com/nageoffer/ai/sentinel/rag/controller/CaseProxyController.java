@@ -60,6 +60,14 @@ public class CaseProxyController {
     }
 
     /**
+     * 中断续跑（SSE 逐事件透传：先回放已完成步骤，再从断点续算）。
+     */
+    @org.springframework.web.bind.annotation.PostMapping("/case/{caseId}/resume")
+    public ResponseEntity<StreamingResponseBody> resumeCase(HttpServletRequest request) {
+        return streamTransfer("POST", agentPath(request), readBody(request), MediaType.TEXT_EVENT_STREAM);
+    }
+
+    /**
      * 调查报告导出（Markdown blob 下载流式透传）。
      */
     @org.springframework.web.bind.annotation.GetMapping("/case/{caseId}/report/export")

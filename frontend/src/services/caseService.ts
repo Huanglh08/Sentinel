@@ -93,6 +93,7 @@ export type InvestigationSseEvent = {
   thought?: string;
   observation?: string;
   is_error?: boolean;
+  replayed?: boolean;
   report?: Record<string, unknown>;
   approvals?: ApprovalItem[];
   actions?: CaseActionItem[];
@@ -162,28 +163,13 @@ export async function exportCaseReport(caseId: string, caseNo: string): Promise<
 }
 
 // ---------------------------------------------------------------------------
-// 发起调查：POST SSE 流式解析（EventSource 不支持 POST，用 fetch + reader）
+// 调查/续跑：POST SSE 流式解析（EventSource 不支持 POST，用 fetch + reader）
 // ---------------------------------------------------------------------------
-export async function streamInvestigate(
-  clue: string,
-  source: string,
-  onEvent: (event: InvestigationSseEvent) => void,
-  signal?: AbortSignal
+async function consumeEventStream(
+  resp: Response,
+  onEvent: (event: InvestigationSseEvent) => void
 ): Promise<void> {
-  const resp = await fetch(`${API_BASE_URL}/case/investigate`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: storage.getToken() || ""
-    },
-    body: JSON.stringify({ clue, source }),
-    signal
-  });
-  if (!resp.ok || !resp.body) {
-    throw new Error(`调查请求失败: HTTP ${resp.status}`);
-  }
-
-  const reader = resp.body.getReader();
+  const reader = resp.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
 
@@ -231,4 +217,42 @@ export async function streamInvestigate(
   if (buffer.trim()) {
     dispatch(buffer.trim());
   }
+}
+
+export async function streamInvestigate(
+  clue: string,
+  source: string,
+  onEvent: (event: InvestigationSseEvent) => void,
+  signal?: AbortSignal
+): Promise<void> {
+  const resp = await fetch(`${API_BASE_URL}/case/investigate`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: storage.getToken() || ""
+    },
+    body: JSON.stringify({ clue, source }),
+    signal
+  });
+  if (!resp.ok || !resp.body) {
+    throw new Error(`调查请求失败: HTTP ${resp.status}`);
+  }
+  await consumeEventStream(resp, onEvent);
+}
+
+// 中断续跑：从最近检查点回放已完成步骤（事件带 replayed 标记）后从断点继续
+export async function streamResume(
+  caseId: string,
+  onEvent: (event: InvestigationSseEvent) => void,
+  signal?: AbortSignal
+): Promise<void> {
+  const resp = await fetch(`${API_BASE_URL}/case/${caseId}/resume`, {
+    method: "POST",
+    headers: { Authorization: storage.getToken() || "" },
+    signal
+  });
+  if (!resp.ok || !resp.body) {
+    throw new Error(`续跑请求失败: HTTP ${resp.status}`);
+  }
+  await consumeEventStream(resp, onEvent);
 }
