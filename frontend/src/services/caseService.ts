@@ -135,6 +135,15 @@ export async function decideApproval(
   );
 }
 
+export async function revokeAction(
+  actionId: string
+): Promise<{ revoked: CaseActionItem; approval: ApprovalItem | null }> {
+  return api.post<
+    { revoked: CaseActionItem; approval: ApprovalItem | null },
+    { revoked: CaseActionItem; approval: ApprovalItem | null }
+  >(`/case/actions/${actionId}/revoke`, {});
+}
+
 export async function closeCase(
   caseId: string
 ): Promise<{ case: CaseDetail; closed: boolean }> {

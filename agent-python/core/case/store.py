@@ -12,10 +12,11 @@ import json
 import logging
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from core.case.types import (
     ACTION_STATUS_EXECUTED,
+    ACTION_STATUS_REVOKED,
     APPROVAL_STATUS_PENDING,
     AUDIT_OPERATION_CLOSE,
     AUDIT_OPERATION_KB_DISTILL,
@@ -37,6 +38,31 @@ logger = logging.getLogger(__name__)
 
 # 知识沉淀最大入库长度（与 t_case_kb_distillation.distillation VARCHAR(2048) 对齐）
 KB_DISTILLATION_MAX_CHARS = 2048
+
+_AUTO_OPERATORS = ("L1:auto", "L2:auto")
+
+
+def _assert_revocable(rec: dict, now: datetime, window_minutes: int) -> None:
+    """撤回前置校验：来源必须是系统自动、执行态、窗口内；违规一律 ValueError。
+
+    窗口即「可反悔期」（业界原型：Gmail 撤回邮件/微信两分钟撤回），
+    超窗后入口消失，只能走重新调查流程——避免撤回任务无限堆积。
+    """
+    if str(rec.get("operator")) not in _AUTO_OPERATORS:
+        raise ValueError("仅系统自动放行（L1/L2）的动作支持撤回，人工裁决请走审批复核")
+    if rec.get("status") != ACTION_STATUS_EXECUTED:
+        raise ValueError("该动作不是执行中状态（可能已撤回），无法重复撤回")
+    created = rec.get("create_time")
+    if isinstance(created, str):
+        try:
+            created = datetime.fromisoformat(created)
+        except ValueError:
+            created = None
+    if created is None:
+        raise ValueError("缺少动作时间，无法判定撤回窗口")
+    # .timestamp() 对 naive/aware 时间统一按本地时轴比较，兼容 DB 与内存两种来源
+    if now.timestamp() - created.timestamp() > window_minutes * 60:
+        raise ValueError(f"已超可撤回窗口（{window_minutes} 分钟），请走重新调查流程")
 
 _CASE_COLS = (
     "id, case_no, title, status, priority, severity, confidence, subject_type, subject_id, "
@@ -836,6 +862,52 @@ class CaseStore:
                 if a.get("case_id") == case_id and a.get("operator") == operator
             }
         return keys
+
+    def revoke_auto_action(self, action_id: str, window_minutes: int = 30) -> dict | None:
+        """撤回自动放行动作（补偿式撤销第一步：状态回退）。
+
+        Saga compensation 语义（对齐 Temporal saga / BPMN compensation handler）：
+        仅 operator 为 L1:auto / L2:auto、状态 EXECUTED 且在窗口内的动作可撤回；
+        原记录状态改 REVOKED（历史不改写，补偿动作与重开审批由调用方编排）。
+        返回撤回后的动作记录；不存在返回 None；违规 ValueError。
+        """
+        now = self._now()
+        if self.enabled:
+            try:
+                with get_pool().connection() as conn, conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT id, case_id, case_no, action, detail, status, operator, create_time "
+                        "FROM t_case_action WHERE id=%s FOR UPDATE",
+                        (action_id,),
+                    )
+                    row = cur.fetchone()
+                    if row is None:
+                        return None
+                    cols = ("id", "case_id", "case_no", "action", "detail", "status",
+                            "operator", "create_time")
+                    rec = dict(zip(cols, row))
+                    _assert_revocable(rec, now, window_minutes)
+                    cur.execute(
+                        "UPDATE t_case_action SET status=%s WHERE id=%s AND status=%s",
+                        (ACTION_STATUS_REVOKED, action_id, ACTION_STATUS_EXECUTED),
+                    )
+                    if cur.rowcount == 0:  # 并发撤回保护
+                        raise ValueError("该动作已被撤回或状态已变化，请刷新后重试")
+                    rec["status"] = ACTION_STATUS_REVOKED
+                    self._mem_actions[action_id] = dict(rec)
+                    return rec
+            except ValueError:
+                raise
+            except Exception:  # noqa: BLE001
+                logger.exception("[case] 自动动作撤回失败: %s", action_id)
+        rec = self._mem_actions.get(action_id)
+        if rec is None:
+            return None
+        rec = dict(rec)
+        _assert_revocable(rec, now, window_minutes)
+        rec["status"] = ACTION_STATUS_REVOKED
+        self._mem_actions[action_id] = rec
+        return rec
 
     def list_actions(self, case_id: str, limit: int = 100) -> list[dict]:
         """案件处置动作列表，按创建时间倒序。"""

@@ -156,9 +156,9 @@ function WaterfallRow({
           className={cn(
               "grid grid-cols-[minmax(180px,1fr)_120px_2fr_100px] gap-4 px-4 py-2.5 transition-colors group",
               clickable && "cursor-pointer hover:bg-slate-50/80",
-              isRoot && "bg-indigo-50/40 border-b border-indigo-100",
-              isTopSlowest && !isSelected && !isRoot && "bg-amber-50/40",
-              isSelected && "bg-blue-50/60 ring-1 ring-inset ring-blue-200"
+              isRoot && "bg-indigo-500/10 border-b border-indigo-400/20",
+              isTopSlowest && !isSelected && !isRoot && "bg-amber-500/10",
+              isSelected && "bg-blue-500/15 ring-1 ring-inset ring-blue-400/30"
           )}
       >
         <div className="flex items-center gap-1.5 min-w-0">
@@ -212,7 +212,7 @@ function WaterfallRow({
             {[25, 50, 75].map(p => (
                 <div
                     key={p}
-                    className="absolute top-0 bottom-0 w-px bg-slate-200"
+                    className="absolute top-0 bottom-0 w-px bg-white/10"
                     style={{ left: `${p}%` }}
                 />
             ))}
@@ -295,11 +295,11 @@ function NodeDetailCard({
             {node.methodName && <DetailField label="方法" value={node.methodName} mono />}
           </div>
           {node.errorMessage && (
-              <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
-                <AlertTriangle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
+              <div className="flex items-start gap-2 p-3 bg-red-500/10 border border-red-400/30 rounded-lg">
+                <AlertTriangle className="h-4 w-4 text-red-400 shrink-0 mt-0.5" />
                 <div className="text-xs">
-                  <p className="font-medium text-red-800 mb-1">错误信息</p>
-                  <p className="text-red-700 whitespace-pre-wrap break-all">{node.errorMessage}</p>
+                  <p className="font-medium text-red-200 mb-1">错误信息</p>
+                  <p className="text-red-300 whitespace-pre-wrap break-all">{node.errorMessage}</p>
                 </div>
               </div>
           )}
@@ -665,11 +665,11 @@ export function RagTraceDetailPage() {
 
         {/* 错误提示 */}
         {selectedRun.errorMessage && (
-            <div className="flex items-start gap-3 p-3 bg-red-50 border border-red-200 rounded-lg">
-              <AlertTriangle className="h-4 w-4 text-red-500 shrink-0 mt-0.5" />
+            <div className="flex items-start gap-3 p-3 bg-red-500/10 border border-red-400/30 rounded-lg">
+              <AlertTriangle className="h-4 w-4 text-red-400 shrink-0 mt-0.5" />
               <div className="text-sm">
-                <span className="font-medium text-red-800">执行出错：</span>
-                <span className="text-red-600 ml-1">{selectedRun.errorMessage}</span>
+                <span className="font-medium text-red-200">执行出错：</span>
+                <span className="text-red-300 ml-1">{selectedRun.errorMessage}</span>
               </div>
             </div>
         )}

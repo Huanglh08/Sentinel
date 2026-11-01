@@ -24,11 +24,11 @@ export function Header({ onToggleSidebar }: HeaderProps) {
             size="icon"
             onClick={onToggleSidebar}
             aria-label="切换侧边栏"
-            className="text-gray-500 hover:bg-gray-100 lg:hidden"
+            className="text-slate-400 hover:bg-white/10 lg:hidden"
           >
             <Menu className="h-5 w-5" />
           </Button>
-          <p className="text-base font-medium text-gray-900">
+          <p className="text-base font-medium text-slate-100">
             {currentSession?.title || "新对话"}
           </p>
         </div>

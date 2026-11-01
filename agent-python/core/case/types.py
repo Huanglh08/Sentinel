@@ -28,12 +28,14 @@ APPROVAL_STATUS_REJECTED = "REJECTED"
 
 # 处置动作状态（Phase 3：审批通过后自动落处置记录）
 ACTION_STATUS_EXECUTED = "EXECUTED"
+ACTION_STATUS_REVOKED = "REVOKED"  # 补偿式撤销终态（历史不改写，仅状态回退）
 
 # 审计操作类型（Phase 3：裁决/归档全量留痕）
 AUDIT_OPERATION_APPROVE = "APPROVE"
 AUDIT_OPERATION_REJECT = "REJECT"
 AUDIT_OPERATION_CLOSE = "CLOSE"
 AUDIT_OPERATION_ACTION_EXECUTE = "ACTION_EXECUTE"  # 处置动作自动执行（responder 落地）
+AUDIT_OPERATION_REVOKE = "ACTION_REVOKE"  # 补偿式撤销：撤回自动放行动作（Saga compensation）
 AUDIT_OPERATION_AUTO_APPROVE = "AUTO_APPROVE"  # L1 放权：高置信 benign 自动放行
 AUDIT_OPERATION_KB_DISTILL = "KB_DISTILL"  # 知识库飞轮：报告经验回写候选池
 # Phase 4：L2 置信阈值自动处置（业界依据：Vigil 置信 >=0.90 自动执行遏制，

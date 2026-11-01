@@ -892,7 +892,7 @@ export function KnowledgeDocumentsPage() {
                             onClick={() => handleToggleEnabled(doc)}
                             className={cn(
                               "relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background",
-                              enabled ? "bg-blue-600" : "bg-slate-200"
+                              enabled ? "bg-blue-600" : "bg-slate-700"
                             )}
                           >
                             <span
@@ -1089,7 +1089,7 @@ export function KnowledgeDocumentsPage() {
                     <div>文档 [{chunkTarget?.docName}] 已有 {chunkTarget.chunkCount} 个分块记录。</div>
                     <div className="font-medium text-amber-600">重新分块会清空原有 Chunk 记录及向量数据。</div>
                     {chunkTarget?.chunksEdited ? (
-                      <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                      <div className="rounded-md border border-red-400/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
                         <span className="font-semibold">注意：</span>
                         该文档存在被手工编辑过的分块，重新分块会从源文件重新生成，
                         <span className="font-semibold">所有手动修改将丢失且无法恢复</span>。
@@ -1229,7 +1229,7 @@ export function KnowledgeDocumentsPage() {
                       onClick={handleDetailNoChunkToggle}
                       className={cn(
                         "relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background",
-                        detailNoChunk ? "bg-blue-600" : "bg-slate-200"
+                        detailNoChunk ? "bg-blue-600" : "bg-slate-700"
                       )}
                     >
                       <span
@@ -1330,9 +1330,9 @@ export function KnowledgeDocumentsPage() {
                     <div className="flex items-center gap-3">
                       <span className={cn(
                         "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium",
-                        log.status === "success" ? "bg-emerald-50 text-emerald-700" :
-                        log.status === "failed" ? "bg-red-50 text-red-700" :
-                        "bg-amber-50 text-amber-700"
+                        log.status === "success" ? "bg-emerald-500/15 text-emerald-300" :
+                        log.status === "failed" ? "bg-red-500/15 text-red-300" :
+                        "bg-amber-500/15 text-amber-300"
                       )}>
                         {formatLogStatus(log.status)}
                       </span>
@@ -1387,7 +1387,7 @@ export function KnowledgeDocumentsPage() {
 
                   {/* 错误信息 */}
                   {log.errorMessage && (
-                    <div className="rounded-lg bg-red-50 p-3 text-sm text-red-600">
+                    <div className="rounded-lg bg-red-500/10 p-3 text-sm text-red-300">
                       <div className="font-medium mb-1">错误信息</div>
                       <div className="text-xs">{log.errorMessage}</div>
                     </div>
@@ -1953,7 +1953,7 @@ function UploadDialog({ open, onOpenChange, onSubmit }: UploadDialogProps) {
                       onClick={handleNoChunkToggle}
                       className={cn(
                         "relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background",
-                        noChunk ? "bg-blue-600" : "bg-slate-200"
+                        noChunk ? "bg-blue-600" : "bg-slate-700"
                       )}
                     >
                       <span

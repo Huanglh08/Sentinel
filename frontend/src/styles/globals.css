@@ -3041,7 +3041,7 @@ textarea {
   }
 
   .admin-layout .settings-section-title {
-    @apply text-[15px] font-semibold text-slate-900;
+    @apply text-[15px] font-semibold text-slate-100;
   }
 
   .admin-layout .settings-section-hint {
@@ -3049,7 +3049,7 @@ textarea {
   }
 
   .admin-layout .settings-card {
-    @apply rounded-xl border border-slate-200 bg-white p-5 shadow-sm;
+    @apply rounded-xl border border-white/10 bg-white/[0.03] p-5 shadow-sm;
   }
 
   .admin-layout .settings-arch-grid {
@@ -3057,11 +3057,11 @@ textarea {
   }
 
   .admin-layout .settings-arch-card {
-    @apply flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm;
+    @apply flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-4 shadow-sm;
   }
 
   .admin-layout .settings-arch-card.is-off {
-    @apply border-dashed bg-slate-50/70 shadow-none;
+    @apply border-dashed bg-transparent shadow-none;
   }
 
   .admin-layout .settings-icon {
@@ -3069,32 +3069,32 @@ textarea {
   }
 
   .admin-layout .settings-icon.is-cyan {
-    background: #ecfeff;
-    color: #0e7490;
+    background: rgba(34, 211, 238, 0.12);
+    color: #67e8f9;
   }
 
   .admin-layout .settings-icon.is-emerald {
-    background: #ecfdf5;
-    color: #059669;
+    background: rgba(16, 185, 129, 0.12);
+    color: #6ee7b7;
   }
 
   .admin-layout .settings-icon.is-indigo {
-    background: #eef2ff;
-    color: #4f46e5;
+    background: rgba(99, 102, 241, 0.16);
+    color: #a5b4fc;
   }
 
   .admin-layout .settings-icon.is-amber {
-    background: #fffbeb;
-    color: #d97706;
+    background: rgba(245, 158, 11, 0.14);
+    color: #fcd34d;
   }
 
   .admin-layout .settings-icon.is-sky {
-    background: #f0f9ff;
-    color: #0284c7;
+    background: rgba(14, 165, 233, 0.14);
+    color: #7dd3fc;
   }
 
   .admin-layout .settings-icon.is-slate {
-    @apply bg-slate-100 text-slate-400;
+    @apply bg-white/[0.06] text-slate-400;
   }
 
   .admin-layout .settings-arch-label {
@@ -3102,7 +3102,7 @@ textarea {
   }
 
   .admin-layout .settings-arch-value {
-    @apply font-mono text-sm font-semibold leading-5 text-slate-900;
+    @apply font-mono text-sm font-semibold leading-5 text-slate-100;
   }
 
   .admin-layout .settings-arch-card.is-off .settings-arch-value {
@@ -3130,15 +3130,15 @@ textarea {
   }
 
   .admin-layout .settings-channel {
-    @apply flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2.5;
+    @apply flex items-center gap-3 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2.5;
   }
 
   .admin-layout .settings-channel.is-off {
-    @apply border-dashed bg-slate-50/70;
+    @apply border-dashed bg-transparent;
   }
 
   .admin-layout .settings-channel-name {
-    @apply text-sm font-medium leading-5 text-slate-900;
+    @apply text-sm font-medium leading-5 text-slate-100;
   }
 
   .admin-layout .settings-channel.is-off .settings-channel-name {
@@ -3150,7 +3150,7 @@ textarea {
   }
 
   .admin-layout .settings-channel-weight {
-    @apply ml-auto shrink-0 rounded-full bg-slate-100 px-2 py-0.5 font-mono text-[11px] text-slate-500;
+    @apply ml-auto shrink-0 rounded-full bg-white/[0.06] px-2 py-0.5 font-mono text-[11px] text-slate-400;
   }
 
   .admin-layout .settings-funnel {
@@ -3158,7 +3158,7 @@ textarea {
   }
 
   .admin-layout .settings-funnel-stage {
-    @apply min-w-0 flex-1 rounded-xl border border-slate-200 bg-white p-4;
+    @apply min-w-0 flex-1 rounded-xl border border-white/10 bg-white/[0.03] p-4;
   }
 
   .admin-layout .settings-funnel-step {
@@ -3166,7 +3166,7 @@ textarea {
   }
 
   .admin-layout .settings-funnel-value {
-    @apply mt-1 font-mono text-2xl font-bold tabular-nums leading-8 text-slate-900;
+    @apply mt-1 font-mono text-2xl font-bold tabular-nums leading-8 text-slate-100;
   }
 
   .admin-layout .settings-funnel-unit {
@@ -3174,7 +3174,7 @@ textarea {
   }
 
   .admin-layout .settings-funnel-track {
-    @apply mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100;
+    @apply mt-2 h-1.5 overflow-hidden rounded-full bg-white/[0.06];
   }
 
   .admin-layout .settings-funnel-bar {
@@ -3194,7 +3194,7 @@ textarea {
   }
 
   .admin-layout .settings-scope {
-    @apply mt-4 grid gap-3 rounded-lg border border-slate-200/70 bg-slate-50 p-4 sm:grid-cols-3;
+    @apply mt-4 grid gap-3 rounded-lg border border-white/10 bg-white/[0.02] p-4 sm:grid-cols-3;
   }
 
   .admin-layout .settings-scope-note {
@@ -3210,7 +3210,7 @@ textarea {
   }
 
   .admin-layout .settings-kv-value {
-    @apply break-all text-sm font-medium tabular-nums text-slate-800;
+    @apply break-all text-sm font-medium tabular-nums text-slate-200;
   }
 
   .admin-layout .settings-kv-key {
@@ -3222,7 +3222,7 @@ textarea {
   }
 
   .admin-layout .settings-card-title {
-    @apply mb-4 flex items-center gap-2 text-sm font-semibold text-slate-900;
+    @apply mb-4 flex items-center gap-2 text-sm font-semibold text-slate-100;
   }
 
   .admin-layout .settings-card-title-hint {
@@ -3230,15 +3230,15 @@ textarea {
   }
 
   .admin-layout .settings-feature-row {
-    @apply mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-4;
+    @apply mt-4 flex flex-wrap gap-2 border-t border-white/10 pt-4;
   }
 
   .admin-layout .settings-feature {
-    @apply inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700;
+    @apply inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-slate-300;
   }
 
   .admin-layout .settings-feature.is-off {
-    @apply border-dashed bg-slate-50 text-slate-400;
+    @apply border-dashed bg-transparent text-slate-500;
   }
 
   .admin-layout .settings-feature-key {
@@ -3250,11 +3250,11 @@ textarea {
   }
 
   .admin-layout .settings-tier {
-    @apply flex flex-col gap-2 rounded-lg border border-slate-200 p-3 md:flex-row md:items-center md:gap-4;
+    @apply flex flex-col gap-2 rounded-lg border border-white/10 p-3 md:flex-row md:items-center md:gap-4;
   }
 
   .admin-layout .settings-tier-name {
-    @apply flex w-28 shrink-0 items-center gap-1.5 font-mono text-sm font-semibold text-slate-900;
+    @apply flex w-28 shrink-0 items-center gap-1.5 font-mono text-sm font-semibold text-slate-100;
   }
 
   .admin-layout .settings-tier-chain {
@@ -3266,11 +3266,11 @@ textarea {
   }
 
   .admin-layout .settings-chip {
-    @apply rounded-md bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-700;
+    @apply rounded-md bg-white/[0.06] px-2 py-0.5 font-mono text-xs text-slate-300;
   }
 
   .admin-layout .settings-chip.is-primary {
-    @apply bg-indigo-50 text-indigo-700;
+    @apply bg-indigo-500/15 text-indigo-300;
   }
 
   .admin-layout .settings-tag {
@@ -3278,19 +3278,19 @@ textarea {
   }
 
   .admin-layout .settings-tag.is-on {
-    @apply bg-emerald-50 text-emerald-600;
+    @apply bg-emerald-500/15 text-emerald-300;
   }
 
   .admin-layout .settings-tag.is-off {
-    @apply bg-slate-100 text-slate-400;
+    @apply bg-white/[0.06] text-slate-500;
   }
 
   .admin-layout .settings-tag.is-indigo {
-    @apply bg-indigo-50 text-indigo-600;
+    @apply bg-indigo-500/15 text-indigo-300;
   }
 
   .admin-layout .settings-tag.is-violet {
-    @apply bg-violet-50 text-violet-600;
+    @apply bg-violet-500/15 text-violet-300;
   }
 }
 

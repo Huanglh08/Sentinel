@@ -204,7 +204,7 @@ export function UserListPage() {
                           <Avatar
                             name={user.username || "用户"}
                             src={user.avatar?.trim() || undefined}
-                            className="h-9 w-9 border-slate-200 bg-indigo-50 text-xs font-semibold text-indigo-600"
+                            className="h-9 w-9 border-indigo-400/20 bg-indigo-500/15 text-xs font-semibold text-indigo-300"
                           />
                           <div>
                             <div className="font-medium text-slate-900">{user.username || "-"}</div>

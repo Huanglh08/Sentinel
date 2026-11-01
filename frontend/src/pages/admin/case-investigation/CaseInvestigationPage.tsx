@@ -42,9 +42,11 @@ import {
   getCaseDetail,
   listApprovals,
   listCases,
+  revokeAction,
   streamInvestigate,
   streamResume,
   type ApprovalItem,
+  type CaseActionItem,
   type CaseDetail,
   type CaseListItem,
   type InvestigationSseEvent
@@ -52,17 +54,17 @@ import {
 import { Archive, CheckCircle2, FileDown, Gavel, Loader2, RotateCcw, Search, XCircle } from "lucide-react";
 
 const STATUS_VARIANT: Record<string, string> = {
-  OPEN: "bg-blue-100 text-blue-700",
-  INVESTIGATING: "bg-amber-100 text-amber-700",
-  REPORTED: "bg-violet-100 text-violet-700",
-  CLOSED: "bg-gray-100 text-gray-600"
+  OPEN: "bg-blue-500/15 text-blue-300",
+  INVESTIGATING: "bg-amber-500/15 text-amber-300",
+  REPORTED: "bg-violet-500/15 text-violet-300",
+  CLOSED: "bg-white/[0.06] text-slate-400"
 };
 
 const CONCLUSION_VARIANT: Record<string, string> = {
-  malicious: "bg-red-100 text-red-700",
-  suspicious: "bg-orange-100 text-orange-700",
-  benign: "bg-green-100 text-green-700",
-  inconclusive: "bg-gray-100 text-gray-600"
+  malicious: "bg-red-500/15 text-red-300",
+  suspicious: "bg-orange-500/15 text-orange-300",
+  benign: "bg-green-500/15 text-green-300",
+  inconclusive: "bg-white/[0.06] text-slate-400"
 };
 
 // 未结案原因码 → 中文提示（后端 InvestigationReport.reason_code）
@@ -73,10 +75,10 @@ const REASON_LABEL: Record<string, string> = {
 };
 
 const PRIORITY_VARIANT: Record<string, string> = {
-  P0: "bg-red-100 text-red-700",
-  P1: "bg-orange-100 text-orange-700",
-  P2: "bg-yellow-100 text-yellow-700",
-  P3: "bg-gray-100 text-gray-600"
+  P0: "bg-red-500/15 text-red-300",
+  P1: "bg-orange-500/15 text-orange-300",
+  P2: "bg-yellow-500/15 text-yellow-300",
+  P3: "bg-white/[0.06] text-slate-400"
 };
 
 type StreamLogLine = { text: string; kind: "phase" | "step" | "ok" | "error" };
@@ -170,6 +172,21 @@ export function CaseInvestigationPage() {
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "归档失败");
+    }
+  };
+
+  // 撤回自动放行动作（补偿式撤销：动作回退 + 反向管控 + 落回人工审批）
+  const [revokingId, setRevokingId] = useState<string>("");
+  const handleRevoke = async (a: CaseActionItem) => {
+    setRevokingId(a.id);
+    try {
+      await revokeAction(a.id);
+      toast.success(`已撤回自动放行《${a.action}》，动作回到人工审批队列`);
+      setDetail(await getCaseDetail(a.case_id));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "撤回失败");
+    } finally {
+      setRevokingId("");
     }
   };
 
@@ -491,10 +508,10 @@ export function CaseInvestigationPage() {
                           variant="outline"
                           className={
                             a.status === "APPROVED"
-                              ? "bg-green-100 text-green-700"
+                              ? "bg-green-500/15 text-green-300"
                               : a.status === "REJECTED"
-                                ? "bg-red-100 text-red-700"
-                                : "bg-amber-100 text-amber-700"
+                                ? "bg-red-500/15 text-red-300"
+                                : "bg-amber-500/15 text-amber-300"
                           }
                         >
                           {a.status}
@@ -632,7 +649,7 @@ export function CaseInvestigationPage() {
                 </Badge>
               )}
               {report?.conclusion === "inconclusive" && report.reason_code && (
-                <Badge variant="outline" className="bg-amber-100 text-amber-700">
+                <Badge variant="outline" className="bg-amber-500/15 text-amber-300">
                   {REASON_LABEL[report.reason_code] || report.reason_code}
                 </Badge>
               )}
@@ -662,7 +679,7 @@ export function CaseInvestigationPage() {
               {report?.conclusion === "inconclusive" && report.verdict_reason && (
                 <div>
                   <div className="mb-1 font-medium">未结案原因</div>
-                  <div className="rounded-md bg-amber-50 p-2 text-xs whitespace-pre-wrap">{report.verdict_reason}</div>
+                  <div className="rounded-md bg-amber-500/10 p-2 text-xs whitespace-pre-wrap">{report.verdict_reason}</div>
                 </div>
               )}
               {!!report?.key_findings?.length && (
@@ -683,7 +700,7 @@ export function CaseInvestigationPage() {
                       <li key={i}>
                         {r.action}
                         {r.requires_human_approval && (
-                          <Badge variant="outline" className="ml-1 bg-amber-100 text-amber-700">需人工审批</Badge>
+                          <Badge variant="outline" className="ml-1 bg-amber-500/15 text-amber-300">需人工审批</Badge>
                         )}
                       </li>
                     ))}
@@ -706,7 +723,7 @@ export function CaseInvestigationPage() {
                           <div className="flex items-center gap-2">
                             <Badge variant="outline" className="font-mono">step{s.step_no}</Badge>
                             <span className="font-medium">{s.tool_id}</span>
-                            {s.is_error && <Badge variant="outline" className="bg-red-100 text-red-700">失败</Badge>}
+                            {s.is_error && <Badge variant="outline" className="bg-red-500/15 text-red-300">失败</Badge>}
                             {s.elapsed_ms != null && <span className="text-muted-foreground">{s.elapsed_ms}ms</span>}
                           </div>
                           {s.thought && <div className="mt-1 text-muted-foreground">{s.thought}</div>}
@@ -722,18 +739,49 @@ export function CaseInvestigationPage() {
                 <div>
                   <div className="mb-1 font-medium">处置记录（{detail.actions.length} 条）</div>
                   <div className="space-y-1">
-                    {detail.actions.map((a) => (
-                      <div key={a.id} className="rounded-md border p-2 text-xs">
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline" className="bg-emerald-100 text-emerald-700">{a.status}</Badge>
-                          <span className="font-medium">{a.action}</span>
-                          <span className="ml-auto text-muted-foreground">
-                            {a.operator} · {a.create_time}
-                          </span>
+                    {detail.actions.map((a) => {
+                      // 可撤回：系统自动放行 + 执行态 + 可反悔窗口内（与服务端 CASE_REVOKE_WINDOW_MINUTES 对齐）
+                      const revocable =
+                        (a.operator === "L1:auto" || a.operator === "L2:auto") &&
+                        a.status === "EXECUTED" &&
+                        Date.now() - new Date(a.create_time).getTime() < 30 * 60 * 1000;
+                      return (
+                        <div key={a.id} className="rounded-md border p-2 text-xs">
+                          <div className="flex items-center gap-2">
+                            <Badge
+                              variant="outline"
+                              className={
+                                a.status === "REVOKED"
+                                  ? "bg-white/[0.06] text-slate-400"
+                                  : "bg-emerald-500/15 text-emerald-300"
+                              }
+                            >
+                              {a.status === "REVOKED" ? "已撤回" : a.status}
+                            </Badge>
+                            <span className="font-medium">{a.action}</span>
+                            {revocable && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-6 px-2 text-xs"
+                                disabled={revokingId === a.id}
+                                onClick={() => void handleRevoke(a)}
+                              >
+                                {revokingId === a.id ? (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  "撤回"
+                                )}
+                              </Button>
+                            )}
+                            <span className="ml-auto text-muted-foreground">
+                              {a.operator} · {a.create_time}
+                            </span>
+                          </div>
+                          {a.detail && <div className="mt-1 text-muted-foreground">{a.detail}</div>}
                         </div>
-                        {a.detail && <div className="mt-1 text-muted-foreground">{a.detail}</div>}
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}

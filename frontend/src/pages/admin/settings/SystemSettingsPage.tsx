@@ -176,7 +176,7 @@ function ChannelRow({
       </div>
       <span className="settings-channel-weight">权重 {channel.weight.toFixed(1)}</span>
       {channel.enabled && backendMissing ? (
-        <span className="settings-tag shrink-0 bg-amber-50 text-amber-600">后端未接入</span>
+        <span className="settings-tag shrink-0 bg-amber-500/15 text-amber-300">后端未接入</span>
       ) : (
         <StateTag on={channel.enabled} />
       )}

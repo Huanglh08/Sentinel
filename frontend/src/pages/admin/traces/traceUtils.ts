@@ -93,18 +93,18 @@ export const clamp = (value: number, min: number, max: number): number => {
 
 export const nodeTypeChipClass = (type?: string | null): string => {
   const normalized = (type || "").trim().toUpperCase();
-  if (normalized === "ROOT") return "bg-indigo-100 text-indigo-700";
-  if (normalized === "USER_TTFT") return "bg-rose-100 text-rose-700";
-  if (normalized === "LLM_TTFT") return "bg-emerald-100 text-emerald-700";
-  if (normalized === "LLM_PROVIDER") return "bg-orange-100 text-orange-700";
-  if (normalized === "LLM_ROUTING") return "bg-amber-100 text-amber-700";
-  if (normalized === "GUIDANCE") return "bg-violet-100 text-violet-700";
-  if (normalized === "INTENT") return "bg-sky-100 text-sky-700";
-  if (normalized === "REWRITE") return "bg-teal-100 text-teal-700";
-  if (normalized === "RETRIEVE" || normalized === "RAG_NODE") return "bg-blue-100 text-blue-700";
-  if (normalized === "TITLE_GEN") return "bg-stone-100 text-stone-700";
-  if (normalized.startsWith("MCP")) return "bg-cyan-100 text-cyan-700";
-  return "bg-slate-100 text-slate-600";
+  if (normalized === "ROOT") return "bg-indigo-500/15 text-indigo-300";
+  if (normalized === "USER_TTFT") return "bg-rose-500/15 text-rose-300";
+  if (normalized === "LLM_TTFT") return "bg-emerald-500/15 text-emerald-300";
+  if (normalized === "LLM_PROVIDER") return "bg-orange-500/15 text-orange-300";
+  if (normalized === "LLM_ROUTING") return "bg-amber-500/15 text-amber-300";
+  if (normalized === "GUIDANCE") return "bg-violet-500/15 text-violet-300";
+  if (normalized === "INTENT") return "bg-sky-500/15 text-sky-300";
+  if (normalized === "REWRITE") return "bg-teal-500/15 text-teal-300";
+  if (normalized === "RETRIEVE" || normalized === "RAG_NODE") return "bg-blue-500/15 text-blue-300";
+  if (normalized === "TITLE_GEN") return "bg-stone-500/15 text-stone-300";
+  if (normalized.startsWith("MCP")) return "bg-cyan-500/15 text-cyan-300";
+  return "bg-white/[0.06] text-slate-400";
 };
 
 const NODE_NAME_DISPLAY: Record<string, string> = {

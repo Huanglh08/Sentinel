@@ -62,7 +62,8 @@ class CaseResponder:
         action = str(item.get("action", ""))
         tool_id = self._match_tool(action)
         if tool_id in _BUILTIN_CONTROLS:
-            return await self._execute_builtin(tool_id, action, item, case)
+            # ponytail: 修复存量 await-of-sync（_execute_builtin 是同步方法，await dict 会 TypeError）
+            return self._execute_builtin(tool_id, action, item, case)
         if tool_id:
             try:
                 tools = await self.mcp.list_tools()
@@ -144,3 +145,35 @@ class CaseResponder:
             if keyword and keyword in action:
                 return tool_id
         return ""
+
+    # ------------------------------------------------------------------
+    # 补偿式撤销（Saga compensation handler：动作 -> 反向管控）
+    # ------------------------------------------------------------------
+    def control_type_for(self, action: str) -> str | None:
+        """动作文本 -> 产生的管控类型；未命中返回 None（无外部效果，撤回时无需补偿）。
+
+        对齐 BPMN 补偿事件语义：只有产生过真实副作用的已完成活动才挂补偿处理器，
+        留痕型动作（观察/提醒/通知等）天然无补偿。
+        """
+        return _BUILTIN_CONTROLS.get(self._match_tool(action))
+
+    def release_control(self, case_id: str, control_type: str, reason: str = "") -> dict:
+        """补偿动作：解除该案该类型的生效管控（ACTIVE -> RELEASED，历史不改写）。
+
+        RELEASED 是管控表既有的解除语义（260904_soar_execution.sql），直接复用；
+        失败不假装成功（返回 FAILED 供审计留痕，人工兜底核查管控表）。
+        """
+        try:
+            with get_pool().connection() as conn, conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE t_risk_account_control SET status='RELEASED', update_time=now() "
+                    "WHERE case_id=%s AND control_type=%s AND status='ACTIVE'",
+                    (str(case_id), control_type),
+                )
+                released = cur.rowcount
+        except Exception:  # noqa: BLE001
+            logger.exception("[responder] 补偿解除管控失败 case=%s type=%s", case_id, control_type)
+            return {"status": "FAILED", "released": 0, "detail": "管控解除失败，需人工核查管控表"}
+        detail = f"补偿解除 {released} 条 {control_type} 管控｜{reason}"[:500]
+        logger.info("[responder] 补偿解除管控 case=%s type=%s released=%d", case_id, control_type, released)
+        return {"status": "EXECUTED", "released": released, "detail": detail}

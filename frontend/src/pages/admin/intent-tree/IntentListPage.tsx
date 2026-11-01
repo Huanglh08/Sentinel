@@ -483,7 +483,7 @@ export function IntentListPage() {
               </Button>
               <Button
                 variant="outline"
-                className="h-10 gap-1.5 border-rose-200 bg-rose-50 px-3 text-sm font-medium text-rose-700 hover:bg-rose-100 hover:text-rose-800"
+                className="h-10 gap-1.5 border-rose-400/30 bg-rose-500/10 px-3 text-sm font-medium text-rose-300 hover:bg-rose-500/20 hover:text-rose-200"
                 onClick={handleResetFilters}
               >
                 <X className="h-4 w-4" />
@@ -589,7 +589,7 @@ export function IntentListPage() {
                 {pageRows.map((row) => (
                   <TableRow
                     key={row.id}
-                    className="group text-[13px] hover:!bg-slate-50"
+                    className="group text-[13px] hover:!bg-white/[0.06]"
                   >
                     <TableCell>
                       <Checkbox
@@ -629,7 +629,7 @@ export function IntentListPage() {
                               className={cn(
                                 "rounded px-1.5 py-0.5 text-xs transition-colors",
                                 index === row.pathNames.length - 1
-                                  ? "bg-slate-100 text-slate-600 font-medium hover:bg-slate-200"
+                                  ? "bg-white/[0.08] text-slate-300 font-medium hover:bg-white/[0.12]"
                                   : "text-slate-400 hover:bg-slate-100 hover:text-slate-600"
                               )}
                               onClick={() =>
@@ -699,7 +699,7 @@ export function IntentListPage() {
                       </Badge>
                     </TableCell>
                     <TableCell
-                      className="sticky right-0 z-10 bg-white shadow-[-1px_0_0_rgba(226,232,240,1)] group-hover:bg-slate-50"
+                      className="sticky right-0 z-10 bg-white shadow-[-1px_0_0_rgba(6,10,21,1)] group-hover:bg-slate-50"
                     >
                       <div className="flex items-center gap-2">
                         <Button

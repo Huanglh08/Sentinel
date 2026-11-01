@@ -7,6 +7,11 @@ spring:
   application:
     name: sentinel${unique-name:}-service
 
+  mvc:
+    async:
+      # SSE 长流转发（案件调查/对话）需要超过调查全时长的异步超时，与 rag.sse-timeout-ms 对齐
+      request-timeout: 300000
+
   servlet:
     multipart:
       max-file-size: 50MB

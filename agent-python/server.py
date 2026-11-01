@@ -43,6 +43,7 @@ from core.case.types import (
     AUDIT_OPERATION_ACTION_EXECUTE,
     AUDIT_OPERATION_APPROVE,
     AUDIT_OPERATION_REJECT,
+    AUDIT_OPERATION_REVOKE,
     AUDIT_OPERATION_RULE_APPROVED,
     AUDIT_OPERATION_RULE_REJECTED,
 )
@@ -1170,6 +1171,58 @@ async def approval_decide(
             detail=f"一级通过（待二级复核）{result.get('action', '')}｜意见: {payload.opinion[:100]}",
         )
     return result
+
+
+@app.post("/case/actions/{action_id}/revoke")
+async def action_revoke(action_id: str, request: Request, user=Depends(get_current_user)):
+    """撤回自动放行动作（补偿式撤销，Saga compensation 语义）。
+
+    - 前置：来源必须是 L1:auto/L2:auto、状态 EXECUTED、窗口内
+      （CASE_REVOKE_WINDOW_MINUTES，默认 30 分钟——可反悔期，超窗走重新调查）
+    - 补偿：动作若产生过真实管控（限权/冻结），解除对应 ACTIVE 管控；
+      留痕型动作（观察/提醒等）无外部效果，自动跳过
+    - 回到动作执行前：同动作落回 PENDING 审批单，由人工重新裁决（走现有多级复核）
+    - 全程审计留痕，历史不改写（原动作状态改 REVOKED）
+    """
+    case_agent = _get_case_agent(request)
+    operator = _case_operator(user)
+    if not operator:
+        raise HTTPException(status_code=403, detail="无法确定操作人身份，拒绝敏感操作")
+    try:
+        window = int(os.getenv("CASE_REVOKE_WINDOW_MINUTES", "30"))
+    except ValueError:
+        window = 30
+    try:
+        rec = case_agent.store.revoke_auto_action(action_id, window_minutes=window)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if rec is None:
+        raise HTTPException(status_code=404, detail="action not found")
+    responder = _get_case_responder(request)
+    control_type = responder.control_type_for(rec.get("action", ""))
+    compensation = None
+    if control_type:
+        compensation = responder.release_control(
+            rec.get("case_id", ""), control_type, reason=f"撤回自动动作 {action_id}"
+        )
+    approvals = case_agent.store.create_approvals(
+        rec.get("case_id", ""),
+        rec.get("case_no", ""),
+        [{"action": rec.get("action", ""), "reason": f"[撤回重裁] {rec.get('detail', '')}"[:1024]}],
+    )
+    case_agent.store.record_audit(
+        case_id=rec.get("case_id", ""),
+        approval_id=approvals[0]["id"] if approvals else "",
+        operation=AUDIT_OPERATION_REVOKE,
+        target=action_id,
+        operator=operator,
+        detail=f"撤回自动放行《{rec.get('action', '')}》｜补偿: {compensation or '无外部效果，留痕型动作'}",
+    )
+    return {
+        "revoked": rec,
+        "compensation": compensation,
+        "approval": approvals[0] if approvals else None,
+    }
 
 
 @app.get("/case/kb/distillations")
