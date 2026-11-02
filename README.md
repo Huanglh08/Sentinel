@@ -38,7 +38,7 @@ Java 业务后端 + Python 智能体分层架构，内置完整的 RAG 评测体
 - **双路混合检索** — pgvector 向量（Qwen3-Embedding-8B · 1536 维）+ BM25 关键词并行召回；RRF 融合 + bge-reranker 精排 + 双模型相关性门控（软着陆）+ 文档多样性保底；跨语言查询改写，查询侧 embedding instruction 前缀
 - **Agent 编排** — 意图树路由、会话记忆、MCP 工具调用、引用溯源、grounding 强制注入
 - **案件调查（SOAR）** — 调查→报告→处置闭环，L1/L2 自动决策分级，高危动作双人复核审批；断点续跑 + 补偿撤销（自行处置的动作可回滚，全程留痕审计），线上 override 率监控
-- **评测体系** — RAGAS 四维 80 题 e2e（faithfulness / relevancy / context P&R + 负例拒答）、检索评测（Recall / HitRate）、决策评测（220 案运营集）、红队 80 条对抗攻击
+- **评测体系** — RAGAS 四维 80 题（faithfulness / relevancy / context P&R + 负例拒答）、检索评测（Recall / HitRate）、决策评测（220 案运营集）、红队 80 条对抗攻击
 - **分层安全** — Sa-Token 鉴权、知识库可见性控制、风险策略配置化、间接注入防护评测
 
 ## 架构
@@ -73,13 +73,13 @@ flowchart LR
 
 ```
 sentinel-main/
-├── backend-java/     # Java 业务后端（Spring Boot）
-├── agent-python/     # Python 智能体层（FastAPI）
-│   ├── core/         #   智能体核心（编排 / 检索 / SOAR 等）
-│   ├── mcp-server-py/#   MCP Server
-│   └── eval/         #   评测体系
-├── frontend/         # 前端（React 18）
-└── shots/            # 界面截图
+├── backend-java/      # Java 业务后端（Spring Boot）
+├── agent-python/      # Python 智能体层（FastAPI）
+│   ├── core/          # 智能体核心（编排 / 检索 / SOAR 等）
+│   ├── mcp-server-py/ # MCP Server
+│   └── eval/          # 评测体系
+├── frontend/          # 前端（React 18）
+└── shots/             # 界面截图
 ```
 
 ## 快速开始
