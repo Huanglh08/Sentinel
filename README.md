@@ -8,6 +8,8 @@ Java 业务后端 + Python 智能体分层架构，内置完整的 RAG 评测体
 
 ![Java](https://img.shields.io/badge/Java-17-7c3aed?logo=openjdk&logoColor=white)
 ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.x-6db33f?logo=springboot&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169e1?logo=postgresql&logoColor=white)
+![Redis](https://img.shields.io/badge/Redis-ff4438?logo=redis&logoColor=white)
 ![Python](https://img.shields.io/badge/Python-3.12-3776ab?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
 ![React](https://img.shields.io/badge/React-18-61dafb?logo=react&logoColor=black)
